@@ -14,8 +14,8 @@ import mplfinance as mpf
 from sklearn.utils.class_weight import compute_sample_weight
 
 try:
-    # Téléchargement des données (ex: 7 jours en M5)
-    df_raw = yf.download(tickers=['EURUSD=X'], multi_level_index=False, interval='5m', period= '7d')
+    # Téléchargement des données
+    df_raw = yf.download(tickers=['GC=F'], multi_level_index=False, interval='1h', period= '15d')
 except Exception as e:
     print(f"Erreur lors du téléchargement des données : {e}")
     exit()
@@ -130,6 +130,7 @@ list_col_na = df_raw.columns[df_raw.isna().sum()>100].tolist()
 df_raw.drop(columns=list_col_to_drop + list_barriers + list_col_na, inplace=True, errors='ignore')
 
 df_raw.dropna(axis='index', how='any', inplace=True)
+
 target = df_raw['label']
 features = df_raw.drop(columns=['label']) # On garde uniquement les indicateurs
 
@@ -169,7 +170,6 @@ pipeline_final = Pipeline(steps=[
 # --- VALIDATION CROISÉE SÉQUENTIELLE (WALK-FORWARD VALIDATION - WFV) ---
 
 # PARAMÈTRES WFV
-print(len(features))
 TRAIN_SIZE = int(len(features) * 0.75) 
 TEST_SIZE = int(len(features) * 0.05) 
 STEP_SIZE = TEST_SIZE 
