@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import yfinance as yf
-from src.preprocessing import calculate_atr_series, calculate_rsi, get_double_barrier_levels, label_double_barrier
+
 from sklearn.model_selection import train_test_split, GridSearchCV  
 from sklearn.preprocessing import OrdinalEncoder
 from sklearn.impute import SimpleImputer
@@ -12,107 +12,15 @@ from xgboost import XGBClassifier
 from sklearn.metrics import confusion_matrix, classification_report, accuracy_score
 import mplfinance as mpf
 from sklearn.utils.class_weight import compute_sample_weight
+from src.data_ingestion import fetch_data
+from src.feature_engineering import generate_features_and_labels
 
-try:
-    # Téléchargement des données
-    df_raw = yf.download(tickers=['GC=F'], multi_level_index=False, interval='1h', period= '15d')
-except Exception as e:
-    print(f"Erreur lors du téléchargement des données : {e}")
-    exit()
+# Récupération des données
+df_raw = fetch_data()
 
-# --- CALCUL DES INDICATEURS (FEATURES) ---
+# Création des indicateurs clés et de la variable cible (label)
+df_label = generate_features_and_labels(df=df_raw)
 
-# Différence avec la cloture de la bougie précédente
-df_raw['diff_close'] = df_raw['Close'].diff()
-
-# Taille de la bougie et mèches
-df_raw['taille_bougie'] = df_raw['High'] - df_raw['Low']
-df_raw['taille_corps'] = np.maximum(df_raw['Close'], df_raw['Open']) - np.minimum(df_raw['Close'], df_raw['Open'])
-df_raw['ratio_corps_bougie'] = df_raw['taille_corps'] / df_raw['taille_bougie']
-df_raw['taille_meche_sup'] = df_raw['High'] - np.maximum(df_raw['Close'], df_raw['Open'])
-df_raw['taille_meche_inf'] = np.minimum(df_raw['Close'], df_raw['Open']) - df_raw['Low']
-
-# Moyenne Mobile Exponentielle (EMA)
-for span in [12, 26, 50, 200]:
-    col_name = f'ema_{span}'
-    df_raw[col_name] = df_raw['Close'].ewm(span=span, adjust=False).mean()
-
-# Prix de Cloture - EMA & Momentum
-for span in [12, 26, 50, 200]:
-    df_raw[f'close_ema_{span}'] = df_raw['Close'] - df_raw[f'ema_{span}']
-
-df_raw['momentum_court_terme'] = df_raw['ema_12'] - df_raw['ema_26']
-df_raw['momentum_moyen_terme'] = df_raw['ema_12'] - df_raw['ema_50']
-df_raw['momentum_long_terme'] = df_raw['ema_50'] - df_raw['ema_200']
-
-for col in ['court_terme', 'moyen_terme', 'long_terme']:
-    df_raw[f'diff_momentum_{col}'] = df_raw[f'momentum_{col}'].diff()
-
-# Croisement EMA
-df_raw['croisement_ema_ct'] = (df_raw['ema_12'] > df_raw['ema_26']).astype(int)
-df_raw['croisement_ema_mt'] = (df_raw['ema_12'] > df_raw['ema_50']).astype(int)
-df_raw['croisement_ema_lt'] = (df_raw['ema_50'] > df_raw['ema_200']).astype(int)
-
-# MACD
-df_raw['macd'] = df_raw['ema_12'] - df_raw['ema_26']
-df_raw['signal'] = df_raw['macd'].ewm(span=9, adjust=False).mean()
-df_raw['histogramme'] = df_raw['macd'] - df_raw['signal']
-
-# ROC EMA
-for span in [12, 26, 50, 200]:
-    df_raw[f'roc_ema_{span}'] = df_raw[f'ema_{span}'].diff(periods=5) / df_raw[f'ema_{span}'].shift(5)
-
-# RSI
-df_raw['rsi'] = calculate_rsi(df_raw, close='Close', N=14).astype(float) # Change to float before np.where
-df_raw['niveau_rsi'] = np.where(df_raw['rsi'] > 70, "Surachat", np.where(df_raw['rsi'] < 30, "Survente", "Normal"))
-df_raw['midligne_rsi'] = (df_raw['rsi'] >= 50).astype(int)
-df_raw['roc_rsi_1'] = df_raw['rsi'].diff(1) / df_raw['rsi'].shift(1)
-df_raw['roc_rsi_5'] = df_raw['rsi'].diff(5) / df_raw['rsi'].shift(5) 
-
-# Bandes de Bollinger
-df_raw['middle_band'] = df_raw['Close'].rolling(window=20).mean()
-std_20 = df_raw['Close'].rolling(window=20).std()
-df_raw['upper_band'] = df_raw['middle_band'] + 2 * std_20
-df_raw['lower_band'] = df_raw['middle_band'] - 2 * std_20
-df_raw['bandwidth'] = (df_raw['upper_band'] - df_raw['lower_band']) / df_raw['middle_band']
-df_raw['close_bollinger'] = (df_raw['Close'] - df_raw['lower_band']) / (df_raw['upper_band'] - df_raw['lower_band'])
-df_raw['niveau_close_bb'] = np.where(df_raw['close_bollinger'] > 1, "Surachat", np.where(df_raw['close_bollinger'] < 0, "Survente", "Normal"))
-df_raw['croisement_bb'] = df_raw['Close'] - df_raw['middle_band']
-
-# Volume (Simplified OBV, Price-Volume)
-price_direction = np.sign(df_raw['Close'].diff())
-obv_change = price_direction * df_raw['Volume']
-df_raw['obv'] = obv_change.cumsum()
-df_raw['obv_sign'] = ((df_raw['obv'].diff()) > 0).astype(int)
-df_raw['roc_obv'] = df_raw['obv'].diff(5) / df_raw['obv'].shift(5)
-df_raw['typical_price'] = (df_raw['High'] + df_raw['Low'] + df_raw['Close']) / 3
-df_raw['price_volume'] = df_raw['typical_price'] * df_raw['Volume']
-df_raw['VWA_14'] = df_raw['price_volume'].rolling(14).sum() / df_raw['Volume'].rolling(14).sum()
-df_raw['relation_prix_vwap'] = (df_raw['Close'] > df_raw['VWA_14']).astype(int)
-df_raw['dist_prix_vwap'] = df_raw['Close'] - df_raw['VWA_14']
-
-# Stochastique
-max_high = df_raw['High'].rolling(14).max()
-min_low = df_raw['Low'].rolling(14).min()
-# Gérer la division par zéro
-denominator = (max_high - min_low)
-df_raw['stoch_k'] = np.where(denominator != 0, (df_raw['Close'] - min_low) / denominator, 0)
-df_raw['stoch_d'] = df_raw['stoch_k'].rolling(3).mean()
-df_raw['niveau_stoch'] = np.where(df_raw['stoch_k'] > 0.8, "Surachat", np.where(df_raw['stoch_k'] < 0.2, "Survente", "Normal"))
-df_raw['croisement_stoch'] = (df_raw['stoch_k'] > df_raw['stoch_d']).astype(int)
-
-# ATR et Normalisation
-df_raw['atr'] = calculate_atr_series(df_raw, period=14)
-for span in [12, 26, 50, 200]:
-    df_raw[f'close_ema_{span}_normalisee'] = df_raw[f'close_ema_{span}'] / df_raw['atr']
-
-# --- LABELLISATION CIBLE ---
-
-# 1. Calcul des barrières
-df_raw = get_double_barrier_levels(df_raw, atr_col='atr', profit_mult=2.0, stop_mult=1.0)
-
-# 2. Calcul du label (retire les NaN)
-df_raw['label'] = label_double_barrier(df_raw)
 
 # 3. Préparation des données finales
 df_plot_temp = df_raw.iloc[-200:].copy()
