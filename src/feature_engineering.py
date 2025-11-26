@@ -2,7 +2,7 @@
 
 import pandas as pd
 import numpy as np
-from src.preprocessing import calculate_atr_series, calculate_rsi, get_double_barrier_levels, label_double_barrier
+from src.utils import calculate_atr_series, calculate_rsi, get_double_barrier_levels, label_double_barrier
 
 def generate_features_and_labels(df: pd.DataFrame, tp_mult: float = 2.0, sl_mult: float = 1.0) -> pd.DataFrame:
     """
