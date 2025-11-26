@@ -85,63 +85,77 @@ def get_double_barrier_levels(df, atr_col='ATR', profit_mult=2.0, stop_mult=1.0)
     
     atr_threshold = df[atr_col] 
     
-    # Barrière Supérieure (Take-Profit)
-    df['Barrier_Up'] = df['Close'] + (atr_threshold * profit_mult)
+    # Cas d'achat (long)
+    df['tp_long'] = df['Close'] + (atr_threshold * profit_mult)
+    df['sl_long'] = df['Close'] - (atr_threshold * stop_mult)
     
-    # Barrière Inférieure (Stop-Loss)
-    df['Barrier_Down'] = df['Close'] - (atr_threshold * stop_mult)
-    
+    # Cas de vente (short)
+    df['tp_short'] = df['Close'] - (atr_threshold * profit_mult)
+    df['sl_short'] = df['Close'] + (atr_threshold * stop_mult)
+
     return df
 
 def label_double_barrier(df: pd.DataFrame) -> pd.Series:
     """
-    Détermine la classe cible (1 ou -1) en fonction du premier contact 
-    avec la barrière de profit ou de perte sur les données futures disponibles.
+    Détermine la classe cible (1: Long, 0: Short) en fonction du premier contact 
+    avec les barrières de profit/perte, sans limite de temps (jusqu'à la fin du DF).
     
-    Retourne 0 si aucune barrière n'est touchée (cas rare, fin de série).
+    AVERTISSEMENT : Peut être très lent sur les grands jeux de données !
     """
     
     labels = pd.Series(index=df.index, dtype=float)
+    N = len(df)
     
-    # Itération sur toutes les périodes
-    for i in range(len(df)):
+    for i in range(N):
         
-        current_index = df.index[i]
+        # ----------------------------------------------------
+        # CORRECTION : Fenêtre de recherche jusqu'à la fin (N)
+        # ----------------------------------------------------
+        future_window = df.iloc[i+1:N].copy() 
         
-        barrier_up = df.loc[current_index, 'Barrier_Up']
-        barrier_down = df.loc[current_index, 'Barrier_Down']
-        
-        # La fenêtre de recherche future est TOUT le reste du DataFrame
-        # Attention : C'est ce qui rend l'itération lente
-        future_window = df.iloc[i+1:]
-        
-        # --- 1. Vérification des contacts ---
-        
-        # Le prix Haut a-t-il touché le niveau de profit ?
-        hit_up = future_window[future_window['High'] >= barrier_up]
-        
-        # Le prix Bas a-t-il touché le niveau de stop ?
-        hit_down = future_window[future_window['Low'] <= barrier_down]
-        
-        # --- 2. Détermination du premier contact ---
-        
-        if hit_up.empty and hit_down.empty:
-            # Cas 0: Aucune barrière touchée (se produit uniquement vers la fin de la série)
-            labels.loc[current_index] = 2
+        if future_window.empty:
+            labels.iloc[i] = 2.0 # Non résolu / Fin de série
+            continue
             
-        elif not hit_up.empty and (hit_down.empty or hit_up.index[0] < hit_down.index[0]):
-            # Classe 1: Barrière Supérieure touchée en premier
-            labels.loc[current_index] = 1
+        # Niveaux de barrières pour l'observation actuelle
+        tp_long = df.iloc[i]['tp_long']
+        sl_long = df.iloc[i]['sl_long']
+        tp_short = df.iloc[i]['tp_short']
+        sl_short = df.iloc[i]['sl_short']
+        
+        # --- 1. Déterminer les indices du PREMIER contact pour chaque barrière ---
+        
+        # Long side
+        hit_tp_long_idx = future_window[future_window['High'] >= tp_long].index.min()
+        hit_sl_long_idx = future_window[future_window['Low'] <= sl_long].index.min()
+        
+        # Short side
+        hit_tp_short_idx = future_window[future_window['Low'] <= tp_short].index.min()
+        hit_sl_short_idx = future_window[future_window['High'] >= sl_short].index.min()
+        
+        # --- 2. Trouver le premier événement global ---
+        
+        first_hits = pd.Series({
+            'TP_Long': hit_tp_long_idx,
+            'SL_Long': hit_sl_long_idx,
+            'TP_Short': hit_tp_short_idx,
+            'SL_Short': hit_sl_short_idx
+        }).dropna()
+        
+        if first_hits.empty:
+            labels.iloc[i] = 2.0 # Non résolu dans la fenêtre restante
+            continue
             
-        elif not hit_down.empty and (hit_up.empty or hit_down.index[0] < hit_up.index[0]):
-            # Classe -1: Barrière Inférieure touchée en premier
-            labels.loc[current_index] = 0
+        first_contact_time = first_hits.min()
+        first_contacts = first_hits[first_hits == first_contact_time].index.tolist()
+        
+        # --- 3. Déterminer la Classe Cible (Label) ---
+        
+        if 'TP_Long' in first_contacts:
+            labels.iloc[i] = 1.0
+        elif 'TP_Short' in first_contacts:
+            labels.iloc[i] = 0.0
+        else: # Si SL Long ou SL Short est touché en premier
+            labels.iloc[i] = 2.0 
             
-        elif not hit_up.empty and not hit_down.empty and hit_up.index[0] == hit_down.index[0]:
-            # Cas d'un contact le même jour (gestion du conflit - souvent arbitraire)
-            # Ici, nous favorisons le signal le plus fort si les deux sont touchés.
-            # Pour simplifier, nous attribuons 0 ou -1/+1 en fonction du plus grand mouvement.
-            # Pour l'instant, laissons 0 pour indiquer le conflit/ambiguïté.
-            labels.loc[current_index] = 2
-            
-    return labels
+    return labels.astype(int)

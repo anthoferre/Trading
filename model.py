@@ -2,41 +2,51 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 from src.preprocessing import calculate_atr_series, calculate_rsi, get_double_barrier_levels, label_double_barrier
+from sklearn.model_selection import train_test_split, GridSearchCV  
+from sklearn.preprocessing import OrdinalEncoder
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.feature_selection import SelectKBest
+from xgboost import XGBClassifier
+from sklearn.metrics import confusion_matrix, classification_report, accuracy_score
+import mplfinance as mpf
+from sklearn.utils.class_weight import compute_sample_weight
 
 try:
-    df_raw = yf.download(tickers=['GC=F'], multi_level_index=False, interval='15m', period= '15d')
-except:
-    print("Il y a un problème dans les paramètres rentrés dans la fonction yf.download")
+    # Téléchargement des données (ex: 7 jours en M5)
+    df_raw = yf.download(tickers=['EURUSD=X'], multi_level_index=False, interval='5m', period= '7d')
+except Exception as e:
+    print(f"Erreur lors du téléchargement des données : {e}")
+    exit()
+
+# --- CALCUL DES INDICATEURS (FEATURES) ---
 
 # Différence avec la cloture de la bougie précédente
 df_raw['diff_close'] = df_raw['Close'].diff()
 
-# Taille de la bougie
+# Taille de la bougie et mèches
 df_raw['taille_bougie'] = df_raw['High'] - df_raw['Low']
 df_raw['taille_corps'] = np.maximum(df_raw['Close'], df_raw['Open']) - np.minimum(df_raw['Close'], df_raw['Open'])
 df_raw['ratio_corps_bougie'] = df_raw['taille_corps'] / df_raw['taille_bougie']
 df_raw['taille_meche_sup'] = df_raw['High'] - np.maximum(df_raw['Close'], df_raw['Open'])
 df_raw['taille_meche_inf'] = np.minimum(df_raw['Close'], df_raw['Open']) - df_raw['Low']
 
-# Moyenne Mobile Exponentielle
-df_raw['ema_12'] = df_raw['Close'].ewm(span=12, adjust=False).mean()
-df_raw['ema_26'] = df_raw['Close'].ewm(span=26, adjust=False).mean()
-df_raw['ema_50'] = df_raw['Close'].ewm(span=50, adjust=False).mean()
-df_raw['ema_200'] = df_raw['Close'].ewm(span=200, adjust=False).mean()
+# Moyenne Mobile Exponentielle (EMA)
+for span in [12, 26, 50, 200]:
+    col_name = f'ema_{span}'
+    df_raw[col_name] = df_raw['Close'].ewm(span=span, adjust=False).mean()
 
-# Prix de Cloture - EMA
-df_raw['close_ema_12'] = df_raw['Close'] - df_raw['ema_12']
-df_raw['close_ema_26'] = df_raw['Close'] - df_raw['ema_26']
-df_raw['close_ema_50'] = df_raw['Close'] - df_raw['ema_50']
-df_raw['close_ema_200'] = df_raw['Close'] - df_raw['ema_200']
+# Prix de Cloture - EMA & Momentum
+for span in [12, 26, 50, 200]:
+    df_raw[f'close_ema_{span}'] = df_raw['Close'] - df_raw[f'ema_{span}']
 
-# Momentum
 df_raw['momentum_court_terme'] = df_raw['ema_12'] - df_raw['ema_26']
 df_raw['momentum_moyen_terme'] = df_raw['ema_12'] - df_raw['ema_50']
 df_raw['momentum_long_terme'] = df_raw['ema_50'] - df_raw['ema_200']
-df_raw['diff_momentum_ct'] = df_raw['momentum_court_terme'].diff()
-df_raw['diff_momentum_mt'] = df_raw['momentum_moyen_terme'].diff()
-df_raw['diff_momentum_lt'] = df_raw['momentum_long_terme'].diff()
+
+for col in ['court_terme', 'moyen_terme', 'long_terme']:
+    df_raw[f'diff_momentum_{col}'] = df_raw[f'momentum_{col}'].diff()
 
 # Croisement EMA
 df_raw['croisement_ema_ct'] = (df_raw['ema_12'] > df_raw['ema_26']).astype(int)
@@ -49,14 +59,12 @@ df_raw['signal'] = df_raw['macd'].ewm(span=9, adjust=False).mean()
 df_raw['histogramme'] = df_raw['macd'] - df_raw['signal']
 
 # ROC EMA
-df_raw['roc_ema_12'] = df_raw['ema_12'].diff(periods=5) / df_raw['ema_12'].shift(5)
-df_raw['roc_ema_26'] = df_raw['ema_26'].diff(periods=5) / df_raw['ema_26'].shift(5)
-df_raw['roc_ema_50'] = df_raw['ema_50'].diff(periods=5) / df_raw['ema_50'].shift(5)
-df_raw['roc_ema_200'] = df_raw['ema_200'].diff(periods=5) / df_raw['ema_200'].shift(5)
+for span in [12, 26, 50, 200]:
+    df_raw[f'roc_ema_{span}'] = df_raw[f'ema_{span}'].diff(periods=5) / df_raw[f'ema_{span}'].shift(5)
 
 # RSI
-df_raw['rsi'] = calculate_rsi(df_raw, close='Close', N=14).astype(int)
-df_raw['niveau_rsi'] = np.where(df_raw['rsi'] > 70, "Surachat", np.where((df_raw['rsi'] < 30) & (df_raw['rsi'] != 0), "Survente", "Normal"))
+df_raw['rsi'] = calculate_rsi(df_raw, close='Close', N=14).astype(float) # Change to float before np.where
+df_raw['niveau_rsi'] = np.where(df_raw['rsi'] > 70, "Surachat", np.where(df_raw['rsi'] < 30, "Survente", "Normal"))
 df_raw['midligne_rsi'] = (df_raw['rsi'] >= 50).astype(int)
 df_raw['roc_rsi_1'] = df_raw['rsi'].diff(1) / df_raw['rsi'].shift(1)
 df_raw['roc_rsi_5'] = df_raw['rsi'].diff(5) / df_raw['rsi'].shift(5) 
@@ -71,7 +79,7 @@ df_raw['close_bollinger'] = (df_raw['Close'] - df_raw['lower_band']) / (df_raw['
 df_raw['niveau_close_bb'] = np.where(df_raw['close_bollinger'] > 1, "Surachat", np.where(df_raw['close_bollinger'] < 0, "Survente", "Normal"))
 df_raw['croisement_bb'] = df_raw['Close'] - df_raw['middle_band']
 
-# Volume
+# Volume (Simplified OBV, Price-Volume)
 price_direction = np.sign(df_raw['Close'].diff())
 obv_change = price_direction * df_raw['Volume']
 df_raw['obv'] = obv_change.cumsum()
@@ -86,27 +94,227 @@ df_raw['dist_prix_vwap'] = df_raw['Close'] - df_raw['VWA_14']
 # Stochastique
 max_high = df_raw['High'].rolling(14).max()
 min_low = df_raw['Low'].rolling(14).min()
-df_raw['stoch_k'] = (df_raw['Close'] - min_low) / (max_high - min_low)
+# Gérer la division par zéro
+denominator = (max_high - min_low)
+df_raw['stoch_k'] = np.where(denominator != 0, (df_raw['Close'] - min_low) / denominator, 0)
 df_raw['stoch_d'] = df_raw['stoch_k'].rolling(3).mean()
 df_raw['niveau_stoch'] = np.where(df_raw['stoch_k'] > 0.8, "Surachat", np.where(df_raw['stoch_k'] < 0.2, "Survente", "Normal"))
 df_raw['croisement_stoch'] = (df_raw['stoch_k'] > df_raw['stoch_d']).astype(int)
 
-# ATR
+# ATR et Normalisation
 df_raw['atr'] = calculate_atr_series(df_raw, period=14)
-df_raw['close_ema_12_normalisee'] = df_raw['close_ema_12'] / df_raw['atr']
-df_raw['close_ema_26_normalisee'] = df_raw['close_ema_26'] / df_raw['atr']
-df_raw['close_ema_50_normalisee'] = df_raw['close_ema_50'] / df_raw['atr']
-df_raw['close_ema_200_normalisee'] = df_raw['close_ema_200'] / df_raw['atr']
+for span in [12, 26, 50, 200]:
+    df_raw[f'close_ema_{span}_normalisee'] = df_raw[f'close_ema_{span}'] / df_raw['atr']
 
-# Variables cibles
-df_raw = get_double_barrier_levels(df_raw, atr_col='atr')
+# --- LABELLISATION CIBLE ---
 
+# 1. Calcul des barrières
+df_raw = get_double_barrier_levels(df_raw, atr_col='atr', profit_mult=2.0, stop_mult=1.0)
+
+# 2. Calcul du label (retire les NaN)
 df_raw['label'] = label_double_barrier(df_raw)
 
-df_raw = df_raw[df_raw['label'] != 2.0]
+# 3. Préparation des données finales
+df_plot_temp = df_raw.iloc[-200:].copy()
+df_plot = df_plot_temp.loc[:,['High','Close','Open','Low','ema_12','ema_26','ema_50','ema_200','Volume']].copy()
+df_last_candle = df_raw.iloc[[-1]].copy()
 
+# Suppression des colonnes de prix bruts (High, Low, Open, Close, Volume) et des colonnes de barrière
 list_col_to_drop = df_raw.select_dtypes(include=np.number).columns[(df_raw.select_dtypes(include=np.number).mean() > 1000)].tolist()
+list_barriers = ['tp_long', 'sl_long', 'tp_short', 'sl_short']
 
-df_raw.drop(columns=list_col_to_drop, inplace=True)
+# --- FILTRAGE ET NETTOYAGE ---
+list_col_na = df_raw.columns[df_raw.isna().sum()>100].tolist()
+
+# Suppression des valeurs brutes qui ne sont pas des features utiles pour XGBoost
+df_raw.drop(columns=list_col_to_drop + list_barriers + list_col_na, inplace=True, errors='ignore')
+
+df_raw.dropna(axis='index', how='any', inplace=True)
+target = df_raw['label']
+features = df_raw.drop(columns=['label']) # On garde uniquement les indicateurs
+
+# --- PRÉPARATION ML (Encodage et Pipeline) ---
+
+# Encodage des variables catégorielles
+list_cat_col = features.select_dtypes(exclude=np.number).columns.tolist()
+
+ordre_cat =[
+    ['Survente', 'Normal', 'Surachat'],
+    ['Survente', 'Normal', 'Surachat'],
+    ['Survente', 'Normal', 'Surachat']
+    ]
+
+ordinal_encoder = Pipeline(steps=[
+    ('imputer', SimpleImputer(strategy='constant', fill_value='missing')),
+    ('encoder', OrdinalEncoder(categories=ordre_cat, handle_unknown='use_encoded_value', unknown_value=-1))
+])
+
+preprocessor = ColumnTransformer(
+    transformers=[
+        ('ord_cat', ordinal_encoder, list_cat_col)
+    ],
+    remainder='passthrough'
+)
+
+selector = SelectKBest()
+modele = XGBClassifier(use_label_encoder=False, eval_metric='logloss', random_state=42)
+
+# Pipeline final
+pipeline_final = Pipeline(steps=[
+    ('preprocessor', preprocessor),
+    ('feature_selection', selector),
+    ('classifier', modele)
+])
+
+# --- VALIDATION CROISÉE SÉQUENTIELLE (WALK-FORWARD VALIDATION - WFV) ---
+
+# PARAMÈTRES WFV
+print(len(features))
+TRAIN_SIZE = int(len(features) * 0.75) 
+TEST_SIZE = int(len(features) * 0.05) 
+STEP_SIZE = TEST_SIZE 
+
+n_cycles = int((len(features) - TRAIN_SIZE) / STEP_SIZE)
+if n_cycles < 1: 
+    print("Pas assez de données pour le WFV. Utilisation de la séparation standard.")
+    n_cycles = 1 # Force un cycle
+
+all_predictions = pd.Series(dtype=int)
+all_test_targets = pd.Series(dtype=int)
+
+print(f"\n--- DÉMARRAGE WFV ---")
+print(f"Nombre de cycles WFV (splits) : {n_cycles}")
+
+# Recherche d'hyperparamètres initiale (sur la première fenêtre d'entraînement)
+X_train_initial = features.iloc[:TRAIN_SIZE]
+y_train_initial = target.iloc[:TRAIN_SIZE]
+
+param_grid = {
+    'feature_selection__k': [5,10,20],
+    'classifier__n_estimators' : [100,200],
+}
+
+grid_search_initial = GridSearchCV(
+    estimator=pipeline_final,
+    param_grid=param_grid,
+    cv=3,
+    scoring='f1_macro',
+    verbose=0,
+    n_jobs=-1
+)
+grid_search_initial.fit(X_train_initial, y_train_initial)
+best_params = grid_search_initial.best_params_
+print(f"Meilleurs hyperparamètres initiaux : {best_params}")
+
+# BOUCLE WFV
+for cycle in range(n_cycles):
+    
+    start_train = cycle * STEP_SIZE
+    end_train = start_train + TRAIN_SIZE
+    
+    start_test = end_train
+    end_test = start_test + TEST_SIZE
+    
+    X_train = features.iloc[start_train:end_train]
+    y_train = target.iloc[start_train:end_train]
+    
+    X_test = features.iloc[start_test:end_test]
+    y_test = target.iloc[start_test:end_test]
+    
+    if X_test.empty or X_train.empty: break
+
+    sample_weights = compute_sample_weight(
+        class_weight='balanced', 
+        y=y_train
+    )
+
+    # Reconstruction du Pipeline avec les meilleurs hyperparamètres
+    best_pipeline_cycle = Pipeline(steps=[
+        ('preprocessor', preprocessor),
+        ('feature_selection', SelectKBest(k=best_params['feature_selection__k'])),
+        ('classifier', XGBClassifier(n_estimators=best_params['classifier__n_estimators'], 
+                                     use_label_encoder=False, 
+                                     eval_metric='logloss',
+                                     random_state=42))
+    ])
+    
+    # Entraînement et Prédiction
+    best_pipeline_cycle.fit(X_train, y_train, classifier__sample_weight=sample_weights)
+    y_pred_cycle = best_pipeline_cycle.predict(X_test)
+    y_pred_series = pd.Series(y_pred_cycle, index=X_test.index)
+
+    # Stockage des Résultats
+    all_predictions = pd.concat([all_predictions, y_pred_series])
+    all_test_targets = pd.concat([all_test_targets, y_test])
+
+    acc = accuracy_score(y_test, y_pred_cycle)
+    # print(f"Cycle {cycle + 1}: Précision {acc:.4f}")
+
+# ÉVALUATION GLOBALE WFV
+if not all_test_targets.empty:
+    print("\n" + "="*70)
+    print("RÉSULTATS DE LA VALIDATION CROISÉE SÉQUENTIELLE (WFV)")
+    print("="*70)
+
+    final_accuracy = accuracy_score(all_test_targets, all_predictions)
+    print(f"Précision WFV cumulée : {final_accuracy:.4f}")
+
+    cm_wfv = confusion_matrix(all_test_targets, all_predictions)
+    print("\nMatrice de Confusion WFV :")
+    print(cm_wfv)
+
+    cr_wfv = classification_report(y_true=all_test_targets, y_pred=all_predictions)
+    print("\nClassification Report WFV :")
+    print(cr_wfv)
+    
+    final_live_model = best_pipeline_cycle # Le modèle du dernier cycle est le plus récent
+else:
+    print("\nAucun résultat WFV à afficher (données insuffisantes après nettoyage).")
+    exit()
+
+# --- PRÉDICTION EN TEMPS RÉEL ET AFFICHAGE ---
+
+# 1. Réaligner la dernière bougie et supprimer les colonnes de prix/barrière
+df_last_candle_features = df_last_candle.drop(columns=list_col_to_drop + list_barriers + ['label'], errors='ignore')
+latest_features = df_last_candle_features.loc[:, X_train.columns].copy()
+
+# 2. Prédiction
+prediction_prob = final_live_model.predict_proba(latest_features)
+prob_vente = prediction_prob[0][0]
+prob_achat = prediction_prob[0][1]
+prob_ne_rien_faire = prediction_prob[0][2]
+
+# 3. Récupération des TP/SL (les colonnes de barrière n'ont pas été supprimées de df_last_candle)
+if prob_vente > prob_achat:
+    # Vente (Short)
+    tp_last_candle = df_last_candle['tp_short'].iloc[0]
+    sl_last_candle = df_last_candle['sl_short'].iloc[0]
+else:
+    # Achat (Long)
+    tp_last_candle = df_last_candle['tp_long'].iloc[0]
+    sl_last_candle = df_last_candle['sl_long'].iloc[0]
+
+print(f"\n--- PRÉDICTION DE LA DERNIÈRE BOUGIE ---")
+print(f"Date observation : {latest_features.index[0]}")
+print(f"Probabilité de vente :{prob_vente:.4f}")
+print(f"Probabilité d'achat :{prob_achat:.4f}")
+print(f"Probabilité de ne rien faire :{prob_ne_rien_faire:.4f}")
+print(f"SL : {sl_last_candle:.6f}")
+print(f"TP : {tp_last_candle:.6f}")
 
 
+# 4. Affichage du graphique
+tp_series = pd.Series(tp_last_candle, index=df_plot.index)
+sl_series = pd.Series(sl_last_candle, index=df_plot.index)
+
+apds = [
+    mpf.make_addplot(df_plot['ema_12'], color='cyan', label='EMA 12'),
+    mpf.make_addplot(df_plot['ema_26'], color='steelblue', label='EMA 26'),
+    mpf.make_addplot(df_plot['ema_50'], color='blue', label='EMA 50'),
+    mpf.make_addplot(df_plot['ema_200'], color='navy', label='EMA 200'),
+    mpf.make_addplot(sl_series, color = 'red', linestyle='--', label='Stop Loss'),
+    mpf.make_addplot(tp_series, color = 'green', linestyle='--', label='Take Profit')
+]
+
+mpf.plot(df_plot, type='candle', volume=False, style ='yahoo', 
+         addplot=apds, title="Graphique avec EMAs et Niveaux TP/SL Prédits")
