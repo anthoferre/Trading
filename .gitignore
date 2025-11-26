@@ -1,6 +1,5 @@
 venv/
 .venv/
-config/
 models/
 mlruns/
 mlruns.db
