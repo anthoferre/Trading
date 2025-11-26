@@ -35,6 +35,9 @@ def main(mode: str = "train_and_predict"):
     target = df_to_train['label']
     features = df_to_train.drop(columns=['label', 'tp_long', 'sl_long', 'tp_short', 'sl_short'], errors='ignore')
 
+    # Enregistrer le nom des colonnes pour la prédiction aussi (les mêmes colonnes exactement)
+    features_train_cols = features.columns.tolist()
+
     # Préprocesseur pour l'encodage des variables catégorielles
     preprocessor = get_prepocessor(features)
 
@@ -65,11 +68,12 @@ def main(mode: str = "train_and_predict"):
                 final_model=final_model,
                 ticker=config['data']['ticker'],
                 interval=config['data']['interval'],
-                period=config['data']['period']
+                period=config['data']['period'],
+                features_train_cols=features_train_cols
             )
 
             print("\n" + "="*70)
-            print("RÉSULTAT DE LA PRÉDICTION EN PRODUCTION")
+            print(f"RÉSULTAT DE LA PRÉDICTION EN PRODUCTION POUR {config['data']['ticker']}")
             print("="*70)
             print(f"Date de l'observation : {prediction_result.get('date_observation')}")
             print(f"Action prédite : **{prediction_result.get('action_predite')}**")

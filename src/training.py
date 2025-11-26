@@ -32,7 +32,7 @@ def hyperparameter_optimization(X_train: pd.DataFrame, y_train: pd.Series, prepr
     temp_pipeline = Pipeline(steps=[
         ('preprocessor', preprocessor),
         ('feature_selection', SelectKBest()),
-        ('classifier', XGBClassifier(use_label_encoder=False, eval_metric='logloss', random_state=42))
+        ('classifier', XGBClassifier(eval_metric='logloss', random_state=42))
     ])
 
 
@@ -60,6 +60,7 @@ def run_wfv_training(features: pd.DataFrame, target: pd.Series, TRAIN_SIZE: int,
         tuple[Pipeline, float]: Le modèle final entraîné et la précision WFV cumulée.
     """
     # Initialisation MLFLOW
+    mlflow.set_tracking_uri("sqlite:///mlruns.db")
     mlflow.set_experiment("Trading_Model_Training")
     with mlflow.start_run():
 
@@ -85,7 +86,7 @@ def run_wfv_training(features: pd.DataFrame, target: pd.Series, TRAIN_SIZE: int,
 
         all_predictions = pd.Series(dtype=int)
         all_test_targets = pd.Series(dtype=int)
-        final_model, f"models/{model_name}.pkl" = None
+        final_model = None
             
         # BOUCLE WFV
         for cycle in range(n_cycles):
@@ -123,7 +124,7 @@ def run_wfv_training(features: pd.DataFrame, target: pd.Series, TRAIN_SIZE: int,
             all_test_targets = pd.concat([all_test_targets, y_test])
 
             # Le modèle du dernier cycle est le "meilleur" car le plus récent.
-            final_model, f"models/{model_name}.pkl" = current_pipeline
+            final_model = current_pipeline
 
         # Evaluation finale et logging
         final_accuracy = accuracy_score(all_test_targets, all_predictions)

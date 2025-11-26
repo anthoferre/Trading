@@ -22,12 +22,15 @@ def load_latest_model(model_path: str = "models/XGBoost_Trading_Model.pkl") -> P
         raise FileNotFoundError(f"Le fichier modèle n'a pas été trouvé à {model_path}. Assurez vous d'avoir exécuter l'entraînement.")
     
 
-def get_prediction(final_model: Pipeline, ticker, interval, period):
+def get_prediction(final_model: Pipeline, ticker: str, interval: str, period: str, features_train_cols: list) -> dict:
     """
-    Docstring for get_prediction
-    
-    :param final_model: Description
-    :type final_model: Pipeline
+    Prédire la dernière bougie en direct.
+    Args:
+        final_model : Le meilleur modèle (Pipeline)
+        ticker : le symbole boursier
+        interval : l'intervalle entre les bougies
+        period: la période complète des données
+        features_train_cols: la liste des colonnes du df de l'entraînement
     """
     df_raw = fetch_data(ticker=ticker, interval=interval, period=period)
 
@@ -38,7 +41,7 @@ def get_prediction(final_model: Pipeline, ticker, interval, period):
     df_labeled = generate_features_and_labels(df=df_raw)
 
     # Dernière bougie pour la prédiction
-    df_last_candle = df_raw.iloc[[-1]].copy()
+    df_last_candle = df_labeled.iloc[[-1]].copy()
 
     list_barriers = ['tp_long', 'sl_long', 'tp_short', 'sl_short']
     latest_features = df_last_candle.drop(
@@ -46,18 +49,20 @@ def get_prediction(final_model: Pipeline, ticker, interval, period):
         errors='ignore'
     )
 
+    latest_features = df_last_candle.loc[:, features_train_cols]
+
     # Prédiction
     prediction_prob = final_model.predict_proba(latest_features)
     prob_vente = prediction_prob[0][0]
     prob_achat = prediction_prob[0][1]
-    prob_ne_rien_faire = prediction_prob[0][2]
+    prob_neutre = prediction_prob[0][2]
 
     # Détermination des niveaux TP/SL
-    if prob_achat > prob_vente and prob_achat > prob_ne_rien_faire:
+    if prob_achat > prob_vente and prob_achat > prob_neutre:
         action = "ACHAT (LONG)"
         tp_level = df_last_candle['tp_long'].iloc[0]
         sl_level = df_last_candle['sl_long'].iloc[0]
-    elif prob_vente > prob_achat and prob_vente > prob_ne_rien_faire:
+    elif prob_vente > prob_achat and prob_vente > prob_neutre:
         action = "VENTE (SHORT)"
         tp_level = df_last_candle['tp_short'].iloc[0]
         sl_level = df_last_candle['sl_short'].iloc[0]
@@ -75,7 +80,7 @@ def get_prediction(final_model: Pipeline, ticker, interval, period):
         "probabilites": {
             "vente": f"{prob_vente:.4f}",
             "achat": f"{prob_achat:.4f}",
-            "ne_rien_faire": f"{prob_ne_rien_faire:.4f}"
+            "neutre": f"{prob_neutre:.4f}"
         },
         "niveaux_trading": {
             "take_profit": tp_level,

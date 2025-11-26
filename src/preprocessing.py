@@ -9,7 +9,7 @@ from sklearn.preprocessing import OrdinalEncoder
 from sklearn.feature_selection import SelectKBest
 from xgboost import XGBClassifier
 
-def get_prepocessor(features: pd.Dataframe) -> ColumnTransformer:
+def get_prepocessor(features: pd.DataFrame) -> ColumnTransformer:
     """
     Définit le préprocesseur pour l'encodage des variables catégorielles.
     Args:
