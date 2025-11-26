@@ -1,12 +1,7 @@
 import pandas as pd
 import numpy as np
-import yfinance as yf
-
 from sklearn.model_selection import train_test_split, GridSearchCV  
-from sklearn.preprocessing import OrdinalEncoder
-from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
-from sklearn.compose import ColumnTransformer
 from sklearn.feature_selection import SelectKBest
 from xgboost import XGBClassifier
 from sklearn.metrics import confusion_matrix, classification_report, accuracy_score
@@ -15,6 +10,7 @@ from sklearn.utils.class_weight import compute_sample_weight
 from src.data_ingestion import fetch_data
 from src.feature_engineering import generate_features_and_labels
 from src.preprocessing import get_prepocessor, create_training_pipeline
+from src.training import hyperparameter_optimization
 
 TICKER = 'GC=F'
 
@@ -68,98 +64,6 @@ if __name__ == "__main__":
             print("Pas assez de données pour le WFV. Utilisation de la séparation standard.")
             n_cycles = 1 # Force un cycle
 
-        all_predictions = pd.Series(dtype=int)
-        all_test_targets = pd.Series(dtype=int)
-
-        print(f"\n--- DÉMARRAGE WFV ---")
-        print(f"Nombre de cycles WFV (splits) : {n_cycles}")
-
-        # Recherche d'hyperparamètres initiale (sur la première fenêtre d'entraînement)
-        X_train_initial = features.iloc[:TRAIN_SIZE]
-        y_train_initial = target.iloc[:TRAIN_SIZE]
-
-        param_grid = {
-            'feature_selection__k': [5,10,20],
-            'classifier__n_estimators' : [100,200],
-        }
-
-        grid_search_initial = GridSearchCV(
-            estimator=pipeline_final,
-            param_grid=param_grid,
-            cv=3,
-            scoring='f1_macro',
-            verbose=0,
-            n_jobs=-1
-        )
-        grid_search_initial.fit(X_train_initial, y_train_initial)
-        best_params = grid_search_initial.best_params_
-        print(f"Meilleurs hyperparamètres initiaux : {best_params}")
-
-        # BOUCLE WFV
-        for cycle in range(n_cycles):
-            
-            start_train = cycle * STEP_SIZE
-            end_train = start_train + TRAIN_SIZE
-            
-            start_test = end_train
-            end_test = start_test + TEST_SIZE
-            
-            X_train = features.iloc[start_train:end_train]
-            y_train = target.iloc[start_train:end_train]
-            
-            X_test = features.iloc[start_test:end_test]
-            y_test = target.iloc[start_test:end_test]
-            
-            if X_test.empty or X_train.empty: break
-
-            sample_weights = compute_sample_weight(
-                class_weight='balanced', 
-                y=y_train
-            )
-
-            # Reconstruction du Pipeline avec les meilleurs hyperparamètres
-            best_pipeline_cycle = Pipeline(steps=[
-                ('preprocessor', preprocessor),
-                ('feature_selection', SelectKBest(k=best_params['feature_selection__k'])),
-                ('classifier', XGBClassifier(n_estimators=best_params['classifier__n_estimators'], 
-                                            use_label_encoder=False, 
-                                            eval_metric='logloss',
-                                            random_state=42))
-            ])
-            
-            # Entraînement et Prédiction
-            best_pipeline_cycle.fit(X_train, y_train, classifier__sample_weight=sample_weights)
-            y_pred_cycle = best_pipeline_cycle.predict(X_test)
-            y_pred_series = pd.Series(y_pred_cycle, index=X_test.index)
-
-            # Stockage des Résultats
-            all_predictions = pd.concat([all_predictions, y_pred_series])
-            all_test_targets = pd.concat([all_test_targets, y_test])
-
-            acc = accuracy_score(y_test, y_pred_cycle)
-            # print(f"Cycle {cycle + 1}: Précision {acc:.4f}")
-
-        # ÉVALUATION GLOBALE WFV
-        if not all_test_targets.empty:
-            print("\n" + "="*70)
-            print("RÉSULTATS DE LA VALIDATION CROISÉE SÉQUENTIELLE (WFV)")
-            print("="*70)
-
-            final_accuracy = accuracy_score(all_test_targets, all_predictions)
-            print(f"Précision WFV cumulée : {final_accuracy:.4f}")
-
-            cm_wfv = confusion_matrix(all_test_targets, all_predictions)
-            print("\nMatrice de Confusion WFV :")
-            print(cm_wfv)
-
-            cr_wfv = classification_report(y_true=all_test_targets, y_pred=all_predictions)
-            print("\nClassification Report WFV :")
-            print(cr_wfv)
-            
-            final_live_model = best_pipeline_cycle # Le modèle du dernier cycle est le plus récent
-        else:
-            print("\nAucun résultat WFV à afficher (données insuffisantes après nettoyage).")
-            exit()
 
         # --- PRÉDICTION EN TEMPS RÉEL ET AFFICHAGE ---
 
