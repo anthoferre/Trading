@@ -1,7 +1,6 @@
 # src/training.py
 
 import pandas as pd
-import numpy as np
 from sklearn.pipeline import Pipeline
 from sklearn.feature_selection import SelectKBest
 from sklearn.compose import ColumnTransformer

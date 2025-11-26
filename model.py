@@ -1,16 +1,10 @@
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split, GridSearchCV  
-from sklearn.pipeline import Pipeline
-from sklearn.feature_selection import SelectKBest
-from xgboost import XGBClassifier
-from sklearn.metrics import confusion_matrix, classification_report, accuracy_score
 import mplfinance as mpf
-from sklearn.utils.class_weight import compute_sample_weight
 from src.data_ingestion import fetch_data
 from src.feature_engineering import generate_features_and_labels
 from src.preprocessing import get_prepocessor, create_training_pipeline
-from src.training import hyperparameter_optimization
+from src.training import hyperparameter_optimization, run_wfv_training
 
 TICKER = 'GC=F'
 
@@ -59,41 +53,11 @@ if __name__ == "__main__":
         TEST_SIZE = int(len(features) * 0.05) 
         STEP_SIZE = TEST_SIZE 
 
-        n_cycles = int((len(features) - TRAIN_SIZE) / STEP_SIZE)
-        if n_cycles < 1: 
-            print("Pas assez de données pour le WFV. Utilisation de la séparation standard.")
-            n_cycles = 1 # Force un cycle
-
-
         # --- PRÉDICTION EN TEMPS RÉEL ET AFFICHAGE ---
 
         # 1. Réaligner la dernière bougie et supprimer les colonnes de prix/barrière
         df_last_candle_features = df_last_candle.drop(columns=list_col_to_drop + list_barriers + ['label'], errors='ignore')
         latest_features = df_last_candle_features.loc[:, X_train.columns].copy()
-
-        # 2. Prédiction
-        prediction_prob = final_live_model.predict_proba(latest_features)
-        prob_vente = prediction_prob[0][0]
-        prob_achat = prediction_prob[0][1]
-        prob_ne_rien_faire = prediction_prob[0][2]
-
-        # 3. Récupération des TP/SL (les colonnes de barrière n'ont pas été supprimées de df_last_candle)
-        if prob_vente > prob_achat:
-            # Vente (Short)
-            tp_last_candle = df_last_candle['tp_short'].iloc[0]
-            sl_last_candle = df_last_candle['sl_short'].iloc[0]
-        else:
-            # Achat (Long)
-            tp_last_candle = df_last_candle['tp_long'].iloc[0]
-            sl_last_candle = df_last_candle['sl_long'].iloc[0]
-
-        print(f"\n--- PRÉDICTION DE LA DERNIÈRE BOUGIE ---")
-        print(f"Date observation : {latest_features.index[0]}")
-        print(f"Probabilité de vente :{prob_vente:.4f}")
-        print(f"Probabilité d'achat :{prob_achat:.4f}")
-        print(f"Probabilité de ne rien faire :{prob_ne_rien_faire:.4f}")
-        print(f"SL : {sl_last_candle:.6f}")
-        print(f"TP : {tp_last_candle:.6f}")
 
 
         # 4. Affichage du graphique
