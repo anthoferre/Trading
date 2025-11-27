@@ -5,7 +5,7 @@ from airflow.providers.docker.operators.docker import DockerOperator
 from datetime import timedelta
 
 # --- CONFIGURATION GLOBALE ---
-DOCKER_IMAGE_NAME = "trading-pipeline:latest"
+DOCKER_IMAGE_NAME = "ghcr.io/anthoferre/trading:latest"
 PROJECT_DIR_HOST = "../.." 
 
 with DAG(

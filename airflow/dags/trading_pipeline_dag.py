@@ -5,7 +5,7 @@ from airflow.providers.docker.operators.docker import DockerOperator
 from datetime import timedelta
 
 # --- CONFIGURATION GLOBALE ---
-DOCKER_IMAGE_NAME = "trading-pipeline:latest"
+DOCKER_IMAGE_NAME = "ghcr.io/anthoferre/trading:latest"
 PROJECT_DIR_HOST = "../.." 
 
 with DAG(
@@ -25,7 +25,7 @@ with DAG(
     train_model_task = DockerOperator(
         task_id="train_walk_forward_validation",
         image=DOCKER_IMAGE_NAME,
-        command="train", 
+        command="python run_pipeline.py train", 
         volumes=[
             f"{PROJECT_DIR_HOST}/models:/app/models",
             f"{PROJECT_DIR_HOST}/mlruns:/app/mlruns",
@@ -40,7 +40,7 @@ with DAG(
     predict_next_signal_task = DockerOperator(
         task_id="predict_latest_candle",
         image=DOCKER_IMAGE_NAME,
-        command="predict", 
+        command="python run_pipeline.py predict", 
         volumes=[
             f"{PROJECT_DIR_HOST}/models:/app/models",
         ],
