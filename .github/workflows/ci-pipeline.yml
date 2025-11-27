@@ -9,7 +9,7 @@ on:
 
 jobs:
   build_and_push_image:
-    runs-on:ubuntu-latest
+    runs-on: ubuntu-latest
   
     steps:
     - name: Vérification du code
@@ -18,15 +18,15 @@ jobs:
     - name: Configuer Python 3.11
       uses: actions/setup-python@v5
       with:
-        python-version:'3.11'
+        python-version: '3.11'
     
     - name: Cache des dépendances python
       uses: actions/cache@v4
       with:
         path: ~/.cache/pip
         key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
-        restore-keys: | 
-          ${{ runner.os }}-pip-
+        restore-keys: |
+          ${{ runner.os }}-pip- # LIGNE 14 CORRIGÉE (syntaxe YAML)
 
     - name: Installer les dépendances y compris pytest
       run: pip install -r requirements.txt pytest
@@ -49,10 +49,11 @@ jobs:
         tags: |
           type=sha,prefix=,suffix=-${{ github.sha }},format=long
           type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
+          
     - name: Construire et pousser l'image Docker
       uses: docker/build-push-action@v5
       with:
-        context: .
-        push: True
+        context: . # Corrigé : Utilise le répertoire racine pour le contexte Docker
+        push: true
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
