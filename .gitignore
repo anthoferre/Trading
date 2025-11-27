@@ -1,5 +1,7 @@
+.env
 venv/
 .venv/
 models/
 mlruns/
 mlruns.db
+airflow/logs/
