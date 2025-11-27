@@ -9,8 +9,6 @@ jobs:
   build_and_push_image:
     runs-on: ubuntu-latest
     
-    # Ì¥ë Correction #1: AJOUT DES PERMISSIONS
-    # Donne explicitement au jeton GITHUB_TOKEN la permission d'√©crire sur les paquets (ghcr.io)
     permissions:
       contents: read 
       packages: write 
@@ -60,7 +58,7 @@ jobs:
     - name: 8. Construire et pousser l'image Docker
       uses: docker/build-push-action@v5
       with:
-        context: . # Indique de construire √† partir de la racine du d√©p√¥t (o√π se trouve le Dockerfile)
-        push: true
+        context: .
+        push: True
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
