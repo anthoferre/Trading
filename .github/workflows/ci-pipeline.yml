@@ -11,7 +11,11 @@ jobs:
   build_and_push_image:
     runs-on: ubuntu-latest
   
-    steps:
+    permissions:
+      contents: read
+      packages: write 
+
+   steps:
     - name: Vérification du code
       uses: actions/checkout@v4
 
