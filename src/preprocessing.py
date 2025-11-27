@@ -55,7 +55,6 @@ def create_training_pipeline(k_features:int, preprocessor: ColumnTransformer, n_
     selector = SelectKBest(k=k_features)
     modele = XGBClassifier(
         n_estimators= n_estimators,
-        use_label_encoder=False,
         eval_metric='logloss',
         random_state=42
         )

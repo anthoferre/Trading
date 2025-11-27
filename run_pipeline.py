@@ -1,11 +1,8 @@
 # run_pipeline.py
 
-import pandas as pd
-import numpy as np
-import mplfinance as mpf
 from src.data_ingestion import fetch_data
 from src.feature_engineering import generate_features_and_labels
-from src.preprocessing import get_prepocessor, create_training_pipeline
+from src.preprocessing import get_prepocessor
 from src.prediction import get_prediction, load_latest_model
 from src.training import run_wfv_training
 import yaml
