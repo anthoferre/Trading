@@ -3,6 +3,7 @@ import pendulum
 from airflow.models.dag import DAG
 from airflow.providers.docker.operators.docker import DockerOperator
 from datetime import timedelta
+from docker.types import Mount
 
 # --- CONFIGURATION GLOBALE ---
 DOCKER_IMAGE_NAME = "ghcr.io/anthoferre/trading:latest"
@@ -26,13 +27,23 @@ with DAG(
         task_id="train_walk_forward_validation",
         image=DOCKER_IMAGE_NAME,
         command="python run_pipeline.py train", 
-        volumes=[
-            f"{PROJECT_DIR_HOST}/models:/app/models",
-            f"{PROJECT_DIR_HOST}/mlruns:/app/mlruns",
-        ],
+        mounts=[
+        Mount(
+            source='/opt/airflow/models',   
+            target='/app/models',           
+            type='bind',                  
+            read_only=False                
+        ),
+        Mount(
+            source='/opt/airflow/mlruns',
+            target='/app/mlruns',
+            type='bind',
+            read_only=False             
+        )
+    ],
         docker_conn_id="docker_default",
         network_mode="bridge",
-        auto_remove=True,
+        auto_remove='force',
         do_xcom_push=False,
     )
 
@@ -41,12 +52,17 @@ with DAG(
         task_id="predict_latest_candle",
         image=DOCKER_IMAGE_NAME,
         command="python run_pipeline.py predict", 
-        volumes=[
-            f"{PROJECT_DIR_HOST}/models:/app/models",
-        ],
+        mounts=[
+        Mount(
+            source='/opt/airflow/models',   
+            target='/app/models',           
+            type='bind',                  
+            read_only=False                
+        )
+    ],
         docker_conn_id="docker_default",
         network_mode="bridge",
-        auto_remove=True,
+        auto_remove='force',
     )
 
     train_model_task >> predict_next_signal_task

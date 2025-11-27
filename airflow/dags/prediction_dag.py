@@ -3,10 +3,10 @@ import pendulum
 from airflow.models.dag import DAG
 from airflow.providers.docker.operators.docker import DockerOperator
 from datetime import timedelta
+from docker.types import Mount
 
 # --- CONFIGURATION GLOBALE ---
 DOCKER_IMAGE_NAME = "ghcr.io/anthoferre/trading:latest"
-PROJECT_DIR_HOST = "../.." 
 
 with DAG(
     dag_id="hourly_trading_prediction",
@@ -27,11 +27,16 @@ with DAG(
         task_id="predict_latest_candle",
         image=DOCKER_IMAGE_NAME,
         command="predict", 
-        volumes=[
-            f"{PROJECT_DIR_HOST}/models:/app/models",
-        ],
+        mounts=[
+        Mount(
+            source='/opt/airflow/models',   
+            target='/app/models',           
+            type='bind',                  
+            read_only=False                
+        )
+    ],
         docker_conn_id="docker_default", 
-        auto_remove=True,
+        auto_remove='force',
     )
 
     

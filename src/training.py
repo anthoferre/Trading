@@ -60,7 +60,7 @@ def run_wfv_training(features: pd.DataFrame, target: pd.Series, TRAIN_SIZE: int,
         tuple[Pipeline, float]: Le modèle final entraîné et la précision WFV cumulée.
     """
     # Initialisation MLFLOW
-    mlflow.set_tracking_uri("sqlite:///mlruns.db")
+    mlflow.set_tracking_uri("http://mlflow-tracking-server:5000")
     mlflow.set_experiment("Trading_Model_Training")
     with mlflow.start_run():
 

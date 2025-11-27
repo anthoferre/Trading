@@ -79,6 +79,8 @@ x-airflow-common:
     - ${AIRFLOW_PROJ_DIR:-.}/airflow/logs:/opt/airflow/logs
     - ${AIRFLOW_PROJ_DIR:-.}/airflow/config:/opt/airflow/config
     - ${AIRFLOW_PROJ_DIR:-.}/airflow/plugins:/opt/airflow/plugins
+    - ${AIRFLOW_PROJ_DIR:-.}/models:/opt/airflow/models
+    - ${AIRFLOW_PROJ_DIR:-.}/mlruns:/opt/airflow/mlruns
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     &airflow-common-depends-on
@@ -117,6 +119,28 @@ services:
       start_period: 30s
     restart: always
 
+  mlflow-tracking-server:
+    image: python:3.11-slim
+    container_name: mlflow-tracking-server
+    # Monte le dossier mlruns sur l'hôte pour stocker les fichiers modèles (artefacts)
+    volumes:
+      - ${AIRFLOW_PROJ_DIR:-.}/mlruns:/mlruns
+    environment:
+      # Configure MLflow pour utiliser PostgreSQL comme backend de métadonnées
+      MLFLOW_TRACKING_URI: postgresql://airflow:airflow@postgres/mlflow_db
+    ports:
+      - "5000:5000" # Expose l'interface utilisateur de MLflow sur le port 5000
+    command: >
+      bash -c "pip install mlflow psycopg2-binary && 
+               mlflow db upgrade postgresql://airflow:airflow@postgres/mlflow_db && 
+               mlflow server --host 0.0.0.0 --port 5000 
+               --backend-store-uri postgresql://airflow:airflow@postgres/mlflow_db 
+               --default-artifact-root file:/mlruns" # Définit le chemin où MLflow stocke les fichiers
+    depends_on:
+      postgres:
+        condition: service_healthy # Attend que la base de données soit prête
+    restart: always
+    
   airflow-apiserver:
     <<: *airflow-common
     command: api-server
