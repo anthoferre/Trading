@@ -141,6 +141,19 @@ services:
         condition: service_healthy # Attend que la base de données soit prête
     restart: always
     
+  prediction-api:
+    image: trading-pipeline:v1
+    container_name: trading-prediction-api
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "80"]
+    ports:
+      - 8000:80
+    volumes:
+      - ${AIRFLOW_PROJ_DIR:-.}/models:/app/models:ro
+      - ${AIRFLOW_PROJ_DIR:-.}/api:/app/api
+    depends_on:
+      - airflow-scheduler
+    restart: unless-stopped
+    
   airflow-apiserver:
     <<: *airflow-common
     command: api-server

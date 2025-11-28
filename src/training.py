@@ -68,6 +68,7 @@ def run_wfv_training(features: pd.DataFrame, target: pd.Series, TRAIN_SIZE: int,
         mlflow.log_params(config)
         mlflow.log_params({"TRAIN_SIZE": TRAIN_SIZE, "TEST_SIZE": TEST_SIZE, "STEP_SIZE": STEP_SIZE})
 
+        features_train_cols = features.columns.tolist()
 
         n_cycles = int((len(features) - TRAIN_SIZE) / STEP_SIZE)
         if n_cycles < 1: 
@@ -133,7 +134,10 @@ def run_wfv_training(features: pd.DataFrame, target: pd.Series, TRAIN_SIZE: int,
 
         model_name = "XGBoost_Trading_Model"
 
+        # Sauvegarde de la liste de features utilisées pour l'entraînement qui servira aussi pour l'API
+        joblib.dump(features_train_cols, f"models/{model_name}_features.pkl")
 
+        # Sauvegarde du modèle (Pipeline)
         joblib.dump(final_model, f"models/{model_name}.pkl")
         mlflow.log_artifact(f"models/{model_name}.pkl")
 

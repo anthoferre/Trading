@@ -20,5 +20,5 @@ RUN mkdir -p /app/models
 RUN mkdir -p /app/mlruns
 
 # Commande de démarrage 
-CMD ["python", "run_pipeline.py", "train_and_predict"]
+CMD ["python", "run_pipeline.py"]
 
