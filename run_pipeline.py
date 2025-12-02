@@ -8,7 +8,7 @@ from src.training import run_wfv_training
 import yaml
 import mlflow
 
-MLFLOW_TRACKING_URI = "./mlruns"
+MLFLOW_TRACKING_URI = "file:///app/mlruns"
 mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
 
 EXPERIMENT_NAME = "Trading_Model_WFV_Experiment"

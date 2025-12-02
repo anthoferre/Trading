@@ -1,6 +1,7 @@
 
 volumes:
   trading_models:
+  mlruns:
     driver: local
 
 services:
@@ -13,6 +14,7 @@ services:
     volumes:
       - trading_models:/app/models 
       - ./config:/app/config
+      - mlruns:/app/mlruns
     restart: "on-failure"    
     entrypoint: ["python", "run_pipeline.py"] 
 
@@ -28,3 +30,16 @@ services:
       - trading_models:/app/models
     restart: always
     command: uvicorn api.main:app --host 0.0.0.0 --port 80
+
+  # C. MLFlow
+  mlflow-server:
+    image: trading-pipeline:latest
+    container_name: mlflow_tracker
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlruns:/mlruns
+      - ./config:/app/config
+    environment:
+      - MLFLOW_TRACKING_URI=file:/mlruns
+    command: mlflow server --backend-store-uri file:/mlruns --host 0.0.0.0 --port 5000
