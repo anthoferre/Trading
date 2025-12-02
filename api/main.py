@@ -1,38 +1,43 @@
 from fastapi import FastAPI
-from pydantic import BaseModel, create_model
 import joblib
-import pandas as pd
-import uvicorn
 import datetime
+import yaml
+from src.prediction import get_prediction, load_latest_model 
 
+# IMPORTANT : Utilisation des chemins absolus DOCKER
 MODEL_PATH = "/app/models/XGBoost_Trading_Model.pkl"
 FEATURES_LIST_PATH = "/app/models/XGBoost_Trading_Model_features.pkl"
+CONFIG_PATH = "/app/config/config.yaml"
 
+# Variables globales chargées une seule fois
 model = None
 FEATURES_LIST = []
+CONFIG = {}
 
+# --- CHARGEMENT INITIAL ---
 try:
+    # 1. Chargement de la configuration (cruciale pour les paramètres Ticker, Interval, etc.)
+    with open(CONFIG_PATH, 'r') as file:
+        CONFIG = yaml.safe_load(file)
+    print("✅ Configuration chargée avec succès.")
+
+    # 2. Chargement des features entraînées
     FEATURES_LIST = joblib.load(FEATURES_LIST_PATH)
     print("✅ Liste des features chargée avec succès.")
 
-    model = joblib.load(MODEL_PATH)
+    # 3. Chargement du modèle
+    model = load_latest_model(MODEL_PATH)
     print("✅ Modèle chargé avec succès.")
 
-    fields = {name: (float, ...) for name in FEATURES_LIST}
-    FeatureInput = create_model('FeatureInput', **fields)
-    print("✅ Schéma Pydantic créé dynamiquement.")
-
-except FileNotFoundError as e:
-    print(f"❌ Erreur: Fichier non trouvé: {e}")
-    FeatureInput = BaseModel
 except Exception as e:
-    print(f"❌ Erreur inattendue lors du chargement: {e}")
-    FeatureInput = BaseModel
+    print(f"❌ Erreur critique lors du démarrage de l'API: {e}")
+    # Ne pas lancer l'API si le modèle ou la config manque
+
 
 # Initialisation de l'API
 app = FastAPI(title="Trading Prediction API", version="1.0")
 
-# Endpoints de l'API
+# --- ENDPOINTS ---
 
 @app.get("/health")
 def check_health():
@@ -43,34 +48,37 @@ def check_health():
         "timestamp": datetime.datetime.now().isoformat()
     }
 
-@app.post("/predict")
-def predict_last_candle(data: FeatureInput):
-    """Effectue une prédiction d'action sur la dernière bougie (Achat/Vente/Ne rien faire) à partir des features fournis."""
+@app.get("/predict") 
+def predict_realtime_candle():
+    """
+    Appelle la fonction get_prediction() centralisée pour exécuter l'ingestion, 
+    le feature engineering et la prédiction sur la dernière bougie.
+    """
     if model is None:
-        return {"error": "Modèle non disponible. Entraînez le Pipeline d'abord."}
+        return {"error": "Modèle non disponible. Vérifiez les logs de démarrage."}
+        
+    if not FEATURES_LIST or not CONFIG:
+        return {"error": "Configuration ou Features manquantes."}
+
     try:
-        # Convertir les données Pydantic en DataFrame pour le Pipeline
-        input_data_df = pd.DataFrame([data.model_dump()])
-
-        prediction_int = model.predict(input_data_df)[0]
-        prediction_proba = model.predict_proba(input_data_df)[0].tolist()
-
-        label_map = {0: "Vente", 1: "Achat", 2: "Neutre"}
-        action_predite = label_map.get(prediction_int, "Inconnu")
-
-        return {
-            "prediction_action": action_predite,
-            "probabilities": {
-                "Ne rien faire": prediction_proba[2],
-                "Achat": prediction_proba[1],
-                "Vente": prediction_proba[0]
-            },
-            "model_version": "V1.0"
-        }
+        # APPEL DIRECT À LA LOGIQUE CENTRALISÉE DANS src/prediction.py
+        result = get_prediction(
+            final_model=model,
+            ticker=CONFIG['data']['ticker'],
+            interval=CONFIG['data']['interval'],
+            period=CONFIG['data']['period'],
+            features_train_cols=FEATURES_LIST
+        )
+        
+        # Le résultat est déjà formaté comme un dictionnaire par get_prediction()
+        return result
     
     except Exception as e:
-        return {"error": f"Erreur lors de la prédiction: {str(e)}"}
+        # Si une erreur se produit pendant l'exécution (ex: pas de connexion yfinance)
+        return {"status": "error", "message": f"Erreur lors de la prédiction automatique: {str(e)}"}
     
 
 if __name__ == "__main__":
+    import uvicorn
+    # Le port est 80 dans le conteneur, mappé à 8000 par Docker-compose
     uvicorn.run(app, host="0.0.0.0", port=80)

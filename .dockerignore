@@ -1,0 +1,15 @@
+# .dockerignore
+# Ignore le dossier principal des logs Airflow
+airflow/logs
+
+# Ignorer le dossier des DAGs (si vous ne voulez pas les inclure dans l'image)
+# Si vous montez les DAGs via Docker Compose, vous pouvez les ignorer ici.
+airflow/dags
+
+# Ignorer les dossiers des bases de données ou les fichiers temporaires
+airflow/data
+.pytest_cache/
+__pycache__/
+
+# Ignorer le dossier d'expérimentation MLflow
+mlruns/

@@ -68,8 +68,8 @@ def get_prediction(final_model: Pipeline, ticker: str, interval: str, period: st
         sl_level = df_last_candle['sl_short'].iloc[0]
     else:
         action = "NE RIEN FAIRE"
-        tp_level = np.nan
-        sl_level = np.nan
+        tp_level = None
+        sl_level = None
 
     # Résultats
 

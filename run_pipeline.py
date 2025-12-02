@@ -1,4 +1,4 @@
-# run_pipeline.py
+# run_pipeline.py (Mode Forcé : Entraînement puis Prédiction)
 
 from src.data_ingestion import fetch_data
 from src.feature_engineering import generate_features_and_labels
@@ -6,15 +6,21 @@ from src.preprocessing import get_prepocessor
 from src.prediction import get_prediction, load_latest_model
 from src.training import run_wfv_training
 import yaml
-import argparse
+import mlflow
+
+MLFLOW_TRACKING_URI = "./mlruns"
+mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+
+EXPERIMENT_NAME = "Trading_Model_WFV_Experiment"
 
 def load_config(config_path: str = "config/config.yaml") -> dict:
     """Charge la configuration à partir du fichier YAML."""
+    # Le fichier doit exister, sinon l'exécution échoue ici.
     with open(config_path, 'r') as file:
         return yaml.safe_load(file)
 
 def prepare_data(config: dict) -> tuple:
-    """Orchestre le Pipeline"""
+    """Orchestre le Pipeline d'ingestion et de feature engineering."""
     
     df_raw = fetch_data(
         ticker=config['data']['ticker'],
@@ -28,25 +34,23 @@ def prepare_data(config: dict) -> tuple:
         sl_mult=config['strategy']['sl_mult']
     )
 
+    # Nettoyage des NaT et des colonnes de label/barrières
     df_to_train = df_labeled.copy().dropna(axis='index', how='any')
     target = df_to_train['label']
     features = df_to_train.drop(columns=['label', 'tp_long', 'sl_long', 'tp_short', 'sl_short'], errors='ignore')
 
-    # Enregistrer le nom des colonnes pour la prédiction aussi (les mêmes colonnes exactement)
     features_train_cols = features.columns.tolist()
 
-    # Préprocesseur pour l'encodage des variables catégorielles
     preprocessor = get_prepocessor(features)
 
     return df_labeled, features, target, preprocessor, features_train_cols
 
 def execute_train_mode(features, target, preprocessor, config):
-    """Exécute l'entraînement WFV complet et sauvegarde le modèle"""
+    """Exécute l'entraînement WFV complet et sauvegarde le modèle."""
 
     TRAIN_SIZE = int(len(features) * config['training']['train_size_ratio'])
     TEST_SIZE = int(len(features) * config['training']['test_size_ratio'])
     STEP_SIZE = TEST_SIZE 
-
     
     print("🚀 Démarrage de l'entraînement du modèle ...")
     final_model, wfc_accuracy = run_wfv_training(
@@ -61,10 +65,11 @@ def execute_train_mode(features, target, preprocessor, config):
     print(f"✅ Modèle sauvegardé avec précision WFV: {wfc_accuracy:.4f}")
 
 def execute_predict_mode(features_train_cols, config):
-    """Exécute la prédiction sur la dernière bougie"""
+    """Exécute la prédiction sur la dernière bougie."""
 
     print("🎯 Chargement du modèle et Prédiction en temps réel")
     try:
+        # Le modèle est chargé depuis le chemin de sauvegarde
         final_model = load_latest_model(config['training']['model_path'])
     
         prediction_result = get_prediction(
@@ -81,45 +86,59 @@ def execute_predict_mode(features_train_cols, config):
         print(f"Date de l'observation : {prediction_result.get('date_observation')}")
         print(f"Action prédite : **{prediction_result.get('action_predite')}**")
         print(f"Prob. Achat/Vente/Neutre : {prediction_result['probabilites']['achat']} / {prediction_result['probabilites']['vente']} / {prediction_result['probabilites']['neutre']}")
-        print(f"Niveaux de trading : SL={prediction_result['niveaux_trading']['stop_loss']:.4f}, TP={prediction_result['niveaux_trading']['take_profit']:.4f}")
+        
+        if prediction_result.get('action_predite') in ['ACHAT', 'VENTE']:
+            sl = prediction_result['niveaux_trading']['stop_loss']
+            tp = prediction_result['niveaux_trading']['take_profit']
+            print(f"Niveaux de trading : SL={sl:.4f}, TP={tp:.4f}")
+        else:
+            print("Niveaux de trading : Non applicable (Action NEUTRE)")
+        # -----------------------------------------------
+
         print("="*70)
 
         return prediction_result
 
     except FileNotFoundError as e:
-        print(f"Erreur de prédiction : {e}")
+        print(f"❌ Erreur de prédiction : Modèle non trouvé. Assurez-vous d'avoir exécuté l'entraînement auparavant. Détails: {e}")
         return None
 
-def main(mode: str):
-    """Orchestre le Pipeline selon le mode sélectionné"""
-    config = load_config()
-
-    if mode == 'train':
-        _, features, target, preprocessor, _ = prepare_data(config)
-        execute_train_mode(features, target, preprocessor, config)
+def execute_train_and_predict_forced(features, target, preprocessor, features_train_cols, config):
+    """Exécute l'entraînement WFV puis la prédiction immédiate."""
     
-    elif mode == 'predict':
-        df_labeled, features, target, preprocessor, features_train_cols = prepare_data(config)
-        execute_predict_mode(features_train_cols, config)
-    else:
-        print(f"Mode {mode} non reconnu. Veuillez choisir 'train' ou 'predict'.")
+    # 1. Entraînement
+    execute_train_mode(features, target, preprocessor, config)
+    
+    # 2. Prédiction (utilise le modèle fraîchement sauvegardé)
+    prediction_result = execute_predict_mode(features_train_cols, config)
+    
+    return prediction_result
+
+## 🚀 Fonction Principale (Simplifiée)
+
+def main():
+    """
+    Exécute le Pipeline de trading en mode 'Entraînement et Prédiction' (forcé).
+    """
+    
+    try:
+        mlflow.set_experiment(EXPERIMENT_NAME)
+        config = load_config()
+    except FileNotFoundError:
+        mlflow.create_experiment(EXPERIMENT_NAME)
+        print("❌ Erreur critique : Le fichier 'config/config.yaml' est introuvable. Arrêt du pipeline.")
+        return 
+
+    print("⚡Entraînement et Prédiction Séquentiels")
+    
+    # 1. Préparation des données
+    # Collecte tout le nécessaire pour l'entraînement et la prédiction
+    df_labeled, features, target, preprocessor, features_train_cols = prepare_data(config)
+    
+    # 2. Exécution séquentielle
+    execute_train_and_predict_forced(features, target, preprocessor, features_train_cols, config)
 
 
 if __name__ == "__main__":
-
-    parser = argparse.ArgumentParser(
-        description="Lance le Pipeline de trading en mode 'train' ou 'predict'"
-    )
-
-    parser.add_argument(
-        "mode",
-        type=str,
-        choices=['train', 'predict', 'train_and_predict'],
-        default="train_and_predict",
-        nargs='?',
-        help="Le mode d'exécution désiré: 'train' ou 'predict'."
-    )
-
-    args = parser.parse_args()
-    
-    main(args.mode)
+    # La seule et unique manière d'exécuter le script : tout le pipeline.
+    main()

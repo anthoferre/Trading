@@ -2,8 +2,8 @@
 
 data:
   ticker: "GC=F"
-  interval: "1h"
-  period: "15d"
+  interval: "5m"
+  period: "7d"
 
 strategy:
   tp_mult: 2.0
