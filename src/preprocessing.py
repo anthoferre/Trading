@@ -1,30 +1,31 @@
 # src/preprocessing.py
 
-import pandas as pd
 import numpy as np
-from sklearn.pipeline import Pipeline
+import pandas as pd
 from sklearn.compose import ColumnTransformer
+from sklearn.feature_selection import SelectFromModel
 from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OrdinalEncoder
-from sklearn.feature_selection import SelectKBest
 from xgboost import XGBClassifier
+
 
 def get_prepocessor(features: pd.DataFrame) -> ColumnTransformer:
     """
     Définit le préprocesseur pour l'encodage des variables catégorielles.
     Args:
-        features: les caractéristiques du dataframe 
+        features: les caractéristiques du dataframe
     Returns:
         ColumnTransformer: Le transformateur de colonnes Scikit-learn.
     """
     # Encodage des variables catégorielles
     list_cat_col = features.select_dtypes(exclude=np.number).columns.tolist()
 
-    ordre_cat =[
+    ordre_cat = [
         ['Survente', 'Normal', 'Surachat'],
         ['Survente', 'Normal', 'Surachat'],
         ['Survente', 'Normal', 'Surachat']
-        ]
+    ]
 
     ordinal_encoder = Pipeline(steps=[
         ('imputer', SimpleImputer(strategy='constant', fill_value='missing')),
@@ -41,7 +42,8 @@ def get_prepocessor(features: pd.DataFrame) -> ColumnTransformer:
 
     return preprocessor
 
-def create_training_pipeline(k_features:int, preprocessor: ColumnTransformer, n_estimators: int ) -> Pipeline:
+
+def create_training_pipeline(threshold: float, preprocessor: ColumnTransformer, n_estimators: int) -> Pipeline:
     """
     Créer le Pipeline complet comprenant le préprocessing, la sélection des features et le modèle XGBoost.
     Args:
@@ -52,12 +54,14 @@ def create_training_pipeline(k_features:int, preprocessor: ColumnTransformer, n_
         Pipeline: Le Pipeline Scikit-learn prêt à être entrainé.
     """
 
-    selector = SelectKBest(k=k_features)
+    selector = SelectFromModel(XGBClassifier(objective='multi:softprob', eval_metric='mlogloss', random_state=42),
+                               threshold=threshold)
     modele = XGBClassifier(
-        n_estimators= n_estimators,
-        eval_metric='logloss',
+        objective='multi:softprob',
+        n_estimators=n_estimators,
+        eval_metric='mlogloss',
         random_state=42
-        )
+    )
 
     # Pipeline final
     pipeline_final = Pipeline(steps=[
@@ -67,3 +71,17 @@ def create_training_pipeline(k_features:int, preprocessor: ColumnTransformer, n_
     ])
 
     return pipeline_final
+
+
+def drop_multicol(features, *, threshold: float = 0.85):
+    """
+    Docstring for drop_multicol
+
+    :param features: Description
+    :param threshold: Description
+    :type threshold: float
+    """
+    corr = features.select_dtypes(include=np.number).corr()
+    triangle_sup = corr.abs().where(np.triu(np.ones(corr.shape), k=1).astype(bool))
+    to_drop = [col for col in triangle_sup.columns if any(triangle_sup[col] > threshold)]
+    return features.drop(columns=to_drop, errors='ignore')

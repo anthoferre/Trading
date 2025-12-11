@@ -1,8 +1,17 @@
 # src/feature_engineering.py
 
-import pandas as pd
+import joblib
 import numpy as np
-from src.utils import calculate_atr_series, calculate_rsi, get_double_barrier_levels, label_double_barrier
+import pandas as pd
+
+from src.utils import (
+    calculate_adx_dmi,
+    calculate_atr_series,
+    calculate_rsi,
+    get_double_barrier_levels,
+    label_double_barrier,
+)
+
 
 def generate_features_and_labels(df: pd.DataFrame, tp_mult: float = 2.0, sl_mult: float = 1.0) -> pd.DataFrame:
     """
@@ -62,7 +71,7 @@ def generate_features_and_labels(df: pd.DataFrame, tp_mult: float = 2.0, sl_mult
     df_copy['niveau_rsi'] = np.where(df_copy['rsi'] > 70, "Surachat", np.where(df_copy['rsi'] < 30, "Survente", "Normal"))
     df_copy['midligne_rsi'] = (df_copy['rsi'] >= 50).astype(int)
     df_copy['roc_rsi_1'] = df_copy['rsi'].diff(1) / df_copy['rsi'].shift(1)
-    df_copy['roc_rsi_5'] = df_copy['rsi'].diff(5) / df_copy['rsi'].shift(5) 
+    df_copy['roc_rsi_5'] = df_copy['rsi'].diff(5) / df_copy['rsi'].shift(5)
 
     # Bandes de Bollinger
     df_copy['middle_band'] = df_copy['Close'].rolling(window=20).mean()
@@ -71,20 +80,22 @@ def generate_features_and_labels(df: pd.DataFrame, tp_mult: float = 2.0, sl_mult
     df_copy['lower_band'] = df_copy['middle_band'] - 2 * std_20
     df_copy['bandwidth'] = (df_copy['upper_band'] - df_copy['lower_band']) / df_copy['middle_band']
     df_copy['close_bollinger'] = (df_copy['Close'] - df_copy['lower_band']) / (df_copy['upper_band'] - df_copy['lower_band'])
-    df_copy['niveau_close_bb'] = np.where(df_copy['close_bollinger'] > 1, "Surachat", np.where(df_copy['close_bollinger'] < 0, "Survente", "Normal"))
+    df_copy['niveau_close_bb'] = np.where(df_copy['close_bollinger'] > 1, "Surachat", np.where(df_copy['close_bollinger'] < 0,
+                                                                                               "Survente", "Normal"))
     df_copy['croisement_bb'] = df_copy['Close'] - df_copy['middle_band']
 
     # Volume (Simplified OBV, Price-Volume)
-    price_direction = np.sign(df_copy['Close'].diff())
-    obv_change = price_direction * df_copy['Volume']
-    df_copy['obv'] = obv_change.cumsum()
-    df_copy['obv_sign'] = ((df_copy['obv'].diff()) > 0).astype(int)
-    df_copy['roc_obv'] = df_copy['obv'].diff(5) / df_copy['obv'].shift(5)
-    df_copy['typical_price'] = (df_copy['High'] + df_copy['Low'] + df_copy['Close']) / 3
-    df_copy['price_volume'] = df_copy['typical_price'] * df_copy['Volume']
-    df_copy['VWA_14'] = df_copy['price_volume'].rolling(14).sum() / df_copy['Volume'].rolling(14).sum()
-    df_copy['relation_prix_vwap'] = (df_copy['Close'] > df_copy['VWA_14']).astype(int)
-    df_copy['dist_prix_vwap'] = df_copy['Close'] - df_copy['VWA_14']
+    if len(df_copy['Volume'].unique()) > 1:
+        price_direction = np.sign(df_copy['Close'].diff())
+        obv_change = price_direction * df_copy['Volume']
+        df_copy['obv'] = obv_change.cumsum()
+        df_copy['obv_sign'] = ((df_copy['obv'].diff()) > 0).astype(int)
+        df_copy['roc_obv'] = df_copy['obv'].diff(5) / df_copy['obv'].shift(5)
+        df_copy['typical_price'] = (df_copy['High'] + df_copy['Low'] + df_copy['Close']) / 3
+        df_copy['price_volume'] = df_copy['typical_price'] * df_copy['Volume']
+        df_copy['VWA_14'] = df_copy['price_volume'].rolling(14).sum() / df_copy['Volume'].rolling(14).sum()
+        df_copy['relation_prix_vwap'] = (df_copy['Close'] > df_copy['VWA_14']).astype(int)
+        df_copy['dist_prix_vwap'] = df_copy['Close'] - df_copy['VWA_14']
 
     # Stochastique
     max_high = df_copy['High'].rolling(14).max()
@@ -93,13 +104,17 @@ def generate_features_and_labels(df: pd.DataFrame, tp_mult: float = 2.0, sl_mult
     denominator = (max_high - min_low)
     df_copy['stoch_k'] = np.where(denominator != 0, (df_copy['Close'] - min_low) / denominator, 0)
     df_copy['stoch_d'] = df_copy['stoch_k'].rolling(3).mean()
-    df_copy['niveau_stoch'] = np.where(df_copy['stoch_k'] > 0.8, "Surachat", np.where(df_copy['stoch_k'] < 0.2, "Survente", "Normal"))
+    df_copy['niveau_stoch'] = np.where(df_copy['stoch_k'] > 0.8, "Surachat", np.where(df_copy['stoch_k'] < 0.2,
+                                                                                      "Survente", "Normal"))
     df_copy['croisement_stoch'] = (df_copy['stoch_k'] > df_copy['stoch_d']).astype(int)
 
     # ATR et Normalisation
     df_copy['atr'] = calculate_atr_series(df_copy, period=14)
     for span in [12, 26, 50, 200]:
         df_copy[f'close_ema_{span}_normalisee'] = df_copy[f'close_ema_{span}'] / df_copy['atr']
+
+    # ADX et D+/D-
+    df_copy = calculate_adx_dmi(df=df_copy)
 
     # --- LABELLISATION CIBLE ---
 
@@ -108,5 +123,12 @@ def generate_features_and_labels(df: pd.DataFrame, tp_mult: float = 2.0, sl_mult
 
     # 2. Calcul du label (retire les NaN)
     df_copy['label'] = label_double_barrier(df_copy)
+
+    try:
+        DF_PATH = "models/df_labeled.pkl"
+        joblib.dump(df_copy, DF_PATH)
+        print(f"Dataframe sauvegardé avec succès dans {DF_PATH}")
+    except Exception as e:
+        print(f"Erreur de sauvegarde du df {e}")
 
     return df_copy

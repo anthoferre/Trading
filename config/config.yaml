@@ -10,7 +10,6 @@ strategy:
   sl_mult: 1.0
 
 training:
-  train_size_ratio: 0.75
-  test_size_ratio: 0.05
+  n_splits: 5
   model_name: "XGBoost_Trading_Model"
   model_path: "models/XGBoost_Trading_Model.pkl"

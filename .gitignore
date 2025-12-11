@@ -5,3 +5,4 @@ models/
 mlruns/
 mlruns.db
 airflow/logs/
+setup.cfg

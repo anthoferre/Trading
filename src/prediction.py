@@ -1,10 +1,12 @@
 # src/prediction.py
 
-import numpy as np
 import joblib
+import numpy as np
 from sklearn.pipeline import Pipeline
+
 from src.data_ingestion import fetch_data
 from src.feature_engineering import generate_features_and_labels
+
 
 def load_latest_model(model_path: str = "models/XGBoost_Trading_Model.pkl") -> Pipeline:
     """
@@ -19,8 +21,9 @@ def load_latest_model(model_path: str = "models/XGBoost_Trading_Model.pkl") -> P
         print(f"Modèle chargé avec succès depuis : {model_path}")
         return final_model
     except FileNotFoundError:
-        raise FileNotFoundError(f"Le fichier modèle n'a pas été trouvé à {model_path}. Assurez vous d'avoir exécuter l'entraînement.")
-    
+        raise FileNotFoundError(f"Le fichier modèle n'a pas été trouvé à {model_path}. \
+                                Assurez vous d'avoir exécuter l'entraînement.")
+
 
 def get_prediction(final_model: Pipeline, ticker: str, interval: str, period: str, features_train_cols: list) -> dict:
     """
@@ -43,11 +46,10 @@ def get_prediction(final_model: Pipeline, ticker: str, interval: str, period: st
     # Dernière bougie pour la prédiction
     df_last_candle = df_labeled.iloc[[-1]].copy()
 
-    list_barriers = ['tp_long', 'sl_long', 'tp_short', 'sl_short']
-    latest_features = df_last_candle.drop(
-        columns=list_barriers + ['label', 'Close', 'Open', 'High', 'Low', 'Volume', 'ema_12', 'ema_26', 'ema_50', 'ema_200'],
-        errors='ignore'
-    )
+    latest_features = df_last_candle.drop(columns=['label', 'tp_long', 'sl_long', 'tp_short', 'sl_short'], errors='ignore')
+    cols_to_drop = latest_features.select_dtypes(include=np.number).columns[
+        latest_features.select_dtypes(include=np.number).median() > 1000]
+    latest_features = latest_features.drop(labels=cols_to_drop, errors='ignore')
 
     latest_features = df_last_candle.loc[:, features_train_cols]
 
@@ -59,11 +61,11 @@ def get_prediction(final_model: Pipeline, ticker: str, interval: str, period: st
 
     # Détermination des niveaux TP/SL
     if prob_achat > prob_vente and prob_achat > prob_neutre:
-        action = "ACHAT (LONG)"
+        action = "ACHAT"
         tp_level = df_last_candle['tp_long'].iloc[0]
         sl_level = df_last_candle['sl_long'].iloc[0]
     elif prob_vente > prob_achat and prob_vente > prob_neutre:
-        action = "VENTE (SHORT)"
+        action = "VENTE"
         tp_level = df_last_candle['tp_short'].iloc[0]
         sl_level = df_last_candle['sl_short'].iloc[0]
     else:

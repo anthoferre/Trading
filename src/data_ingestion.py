@@ -1,9 +1,10 @@
 # src/data_ingestion.py
 
-import yfinance as yf
 import pandas as pd
+import yfinance as yf
 
-def fetch_data(ticker: str = 'GC=F', interval: str = '1h', period: str = '15d') -> pd.DataFrame:
+
+def fetch_data(*, ticker: str = 'GC=F', interval: str = '1h', period: str = '15d') -> pd.DataFrame:
     """
     Télecharge les données historiques à partir de Yahoo Finance.
     Args:
@@ -19,7 +20,7 @@ def fetch_data(ticker: str = 'GC=F', interval: str = '1h', period: str = '15d') 
             tickers=ticker,
             multi_level_index=False,
             interval=interval,
-            period= period)
+            period=period)
         if df_raw.empty:
             raise ValueError(f"Aucune donnée trouvée pour le symbole {ticker} dans la période {period}")
         return df_raw

@@ -1,20 +1,26 @@
-import pandas as pd
-from sklearn.pipeline import Pipeline
-from sklearn.feature_selection import SelectKBest
-from sklearn.compose import ColumnTransformer
-from sklearn.model_selection import GridSearchCV
-from xgboost import XGBClassifier
-from sklearn.utils.class_weight import compute_sample_weight
-from sklearn.metrics import accuracy_score
-from src.preprocessing import create_training_pipeline
-import mlflow
 import joblib
+import mlflow
+import numpy as np
+import pandas as pd
+from sklearn.compose import ColumnTransformer
+from sklearn.feature_selection import SelectFromModel
+from sklearn.metrics import (
+    balanced_accuracy_score,
+    classification_report,
+    confusion_matrix,
+)
+from sklearn.model_selection import GridSearchCV, TimeSeriesSplit, train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.utils.class_weight import compute_sample_weight
+from xgboost import XGBClassifier
 
+from src.preprocessing import create_training_pipeline
 
 param_grid = {
-    'feature_selection__k': [5,10,20],
-    'classifier__n_estimators' : [100,200],
+    'feature_selection__threshold': ['median', 'mean', 0.01],
+    'classifier__n_estimators': [100, 200],
 }
+
 
 def hyperparameter_optimization(X_train: pd.DataFrame, y_train: pd.Series, preprocessor: ColumnTransformer) -> dict:
     """
@@ -29,126 +35,99 @@ def hyperparameter_optimization(X_train: pd.DataFrame, y_train: pd.Series, prepr
 
     temp_pipeline = Pipeline(steps=[
         ('preprocessor', preprocessor),
-        ('feature_selection', SelectKBest()),
-        ('classifier', XGBClassifier(eval_metric='logloss', random_state=42))
+        ('feature_selection', SelectFromModel(XGBClassifier(objective='multi:softprob',
+                                                            eval_metric='mlogloss', random_state=42))),
+        ('classifier', XGBClassifier(objective='multi:softprob', eval_metric='mlogloss', random_state=42))
     ])
 
+    tscv = TimeSeriesSplit(n_splits=5)
 
     grid_search = GridSearchCV(
-            estimator=temp_pipeline,
-            param_grid=param_grid,
-            cv=3,
-            scoring='f1_macro',
-            verbose=0,
-            n_jobs=-1
-        )
-    grid_search.fit(X_train, y_train)
-    return grid_search.best_params_
+        estimator=temp_pipeline,
+        param_grid=param_grid,
+        cv=tscv,
+        scoring='f1_macro',
+        verbose=0,
+        n_jobs=-1
+    )
 
-def run_wfv_training(features: pd.DataFrame, target: pd.Series, TRAIN_SIZE: int, TEST_SIZE: int, STEP_SIZE: int, preprocessor: ColumnTransformer, config: dict) -> tuple[Pipeline, float]:
+    grid_search.fit(X_train, y_train)
+    best_pipeline = grid_search.best_estimator_
+    feature_selector = best_pipeline.named_steps['feature_selection'].get_support()
+    print(f"Les features gardés pour le modèle sont : {X_train.columns[feature_selector]}")
+    return grid_search.best_params_ , grid_search.best_score_, grid_search.best_estimator_
+
+
+def run_tscv_training(features: pd.DataFrame, target: pd.Series, N_SPLITS: int,
+                      preprocessor: ColumnTransformer, config: dict) -> tuple[Pipeline, float]:
     """
-    Exécute la Walk Forward Validation (WFV), loggue les métriques avec MLFlow et enregistre le modèle.
-    
-    NOTE: Cette fonction suppose qu'un run MLflow est déjà actif (géré dans run_pipeline.py).
-    
+    Exécute la Time Serie Split (TSCV), loggue les métriques avec MLFlow et enregistre le modèle.
+
     Args:
         features: caractéristiques
         target : variable cible (label)
-        TRAIN_SIZE, TEST_SIZE, STEP_SIZE : Paramètres de découpage WFV.
-        preprocessor: ColumnTransformer 
-        config: Dictionnaire de configuration(pour logguer les métadonnées) 
+        N_SPLITS: nb de plis pour le Time Series Splits
+        preprocessor: ColumnTransformer
+        config: Dictionnaire de configuration(pour logguer les métadonnées)
     Returns:
         tuple[Pipeline, float]: Le modèle final entraîné et la précision WFV cumulée.
     """
     # Logguer les paramètres de configuration/environnement
     # Les logs sont envoyés au run MLflow ACTIF
     mlflow.log_params(config)
-    mlflow.log_params({"TRAIN_SIZE": TRAIN_SIZE, "TEST_SIZE": TEST_SIZE, "STEP_SIZE": STEP_SIZE})
+    mlflow.log_params({"N_SPLITS": N_SPLITS})
 
     features_train_cols = features.columns.tolist()
 
-    n_cycles = int((len(features) - TRAIN_SIZE) / STEP_SIZE)
-    if n_cycles < 1: 
-        print("Pas assez de données pour le WFV. Utilisation de la séparation standard.")
-        n_cycles = 1 # Force un cycle
-    print(f"\n--- DÉMARRAGE WFV avec {n_cycles} cycles---")
+    X_train, X_test, y_train, y_test = train_test_split(features, target, test_size=0.2, shuffle=False)
+
+    print(f"\n--- Démarrage Time Series Split avec {N_SPLITS} cycles---")
 
     # Recherche des hyperparamètres (k pour le KBest et n_estimators pour le xgboost)
-    best_params = hyperparameter_optimization(
-        X_train=features.iloc[:TRAIN_SIZE],
-        y_train=target.iloc[:TRAIN_SIZE],
+    best_params, best_score, best_estimator = hyperparameter_optimization(
+        X_train=X_train,
+        y_train=y_train,
         preprocessor=preprocessor
     )
-    print(f"Meilleurs hyperparamètres initiaux : {best_params}")
+    print(f"Meilleurs hyperparamètres : {best_params}")
     mlflow.log_params(best_params)
 
-    all_predictions = pd.Series(dtype=int)
-    all_test_targets = pd.Series(dtype=int)
-    final_model = None
-        
-    # BOUCLE WFV
-    for cycle in range(n_cycles):
-        # Découpage temporel des données
-        start_train = cycle * STEP_SIZE
-        end_train = start_train + TRAIN_SIZE
-        start_test = end_train
-        end_test = start_test + TEST_SIZE
-        
-        X_train = features.iloc[start_train:end_train]
-        y_train = target.iloc[start_train:end_train]
-        X_test = features.iloc[start_test:end_test]
-        y_test = target.iloc[start_test:end_test]
-        
-        if X_test.empty or X_train.empty: break
+    y_pred = best_estimator.predict(X_test)
 
-        sample_weights = compute_sample_weight(
-            class_weight='balanced', 
-            y=y_train
-        )
+    final_accuracy = best_estimator.score(X_test, y_test)
 
-        # Création du Pipeline avec les meilleurs hyperparamètres
-        current_pipeline = create_training_pipeline(
-            k_features=best_params['feature_selection__k'],
-            preprocessor=preprocessor,
-            n_estimators=best_params['classifier__n_estimators']
-        )
+    mlflow.log_metric("tsvv_balanced_accuracy", final_accuracy)
+    print(f"Précision : {final_accuracy:.4f}")
 
-        # Entraînement et Prédiction
-        current_pipeline.fit(X_train, y_train, classifier__sample_weight=sample_weights)
-        y_pred_cycle = current_pipeline.predict(X_test)
+    # Matrice de confusion
+    conf_matrix = confusion_matrix(y_test, y_pred)
+    print("Matrice de confusion")
+    print(conf_matrix)
 
-        # Stockage des Résultats
-        all_predictions = pd.concat([all_predictions, pd.Series(y_pred_cycle, index=X_test.index)])
-        all_test_targets = pd.concat([all_test_targets, y_test])
+    # Rapport de classification
+    report = classification_report(y_true=y_test, y_pred=y_pred)
+    print("Rapport de classification")
+    print(report)
 
-        # Le modèle du dernier cycle est le "meilleur" car le plus récent.
-        final_model = current_pipeline
-
-    # Evaluation finale et logging
-    final_accuracy = accuracy_score(all_test_targets, all_predictions)
-    mlflow.log_metric("wfv_cumulative_accuracy", final_accuracy)
-    print(f"Précision WFV cumulée : {final_accuracy:.4f}")
-
-    model_name = "XGBoost_Trading_Model" # Nom utilisé pour le Registre et les fichiers locaux.
+    model_name = "XGBoost_Trading_Model"
 
     # Sauvegarde de la liste de features utilisées pour l'entraînement (pour l'API)
     joblib.dump(features_train_cols, f"models/{model_name}_features.pkl")
 
     # Sauvegarde du modèle (Pipeline)
-    joblib.dump(final_model, f"models/{model_name}.pkl")
-    
+    joblib.dump(best_estimator, f"models/{model_name}.pkl")
+
     # Log des artefacts (fichiers locaux)
     mlflow.log_artifact(f"models/{model_name}_features.pkl")
     mlflow.log_artifact(f"models/{model_name}.pkl")
 
-
     # Enregistrement dans le Registre MLflow
     mlflow.sklearn.log_model(
-        sk_model=final_model,
+        sk_model=best_estimator,
         artifact_path="model",
         registered_model_name=model_name
     )
 
     print(f"Modèle enregistré dans le registre MLFlow sous le nom : {model_name}")
 
-    return final_model, final_accuracy
+    return best_estimator, final_accuracy
