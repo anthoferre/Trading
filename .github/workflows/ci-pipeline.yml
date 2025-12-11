@@ -65,7 +65,7 @@ jobs:
         labels: ${{ steps.meta.outputs.labels }}
 
     - name: 8b. Construire et pousser l'image Docker pour l'API
-      uses: docker/build-push-actions@v5
+      uses: docker/build-push-action@v5
       with:
         context: .
         file: ./Dockerfile.api
