@@ -1,8 +1,6 @@
 # run_pipeline.py (Mode Forcé : Entraînement puis Prédiction)
 
-import matplotlib.pyplot as plt
 import mlflow
-import mplfinance as mpf
 import numpy as np
 import yaml
 
