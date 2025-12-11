@@ -61,7 +61,9 @@ jobs:
         context: .
         file: ./Dockerfile.pipeline
         push: True
-        tags: ghcr.io/${{ github.repository }}/training-pipeline:${{ steps.meta.outputs.tags }}
+        tags: |
+          ghcr.io/${{ github.repository }}/training-pipeline:${{ steps.meta.outputs.version_tag }}
+          ghcr.io/${{ github.repository }}/training-pipeline:${{ steps.meta.outputs.latest_tag }}
         labels: ${{ steps.meta.outputs.labels }}
 
     - name: 8b. Construire et pousser l'image Docker pour l'API
@@ -70,5 +72,7 @@ jobs:
         context: .
         file: ./Dockerfile.api
         push: True
-        tags: ghcr.io/${{ github.repository }}/trading-api:${{ steps.meta.outputs.tags }}
+        tags: |
+          ghcr.io/${{ github.repository }}/trading-api:${{ steps.meta.outputs.version_tag }}
+          ghcr.io/${{ github.repository }}/trading-api:${{ steps.meta.outputs.latest_tag }}
         labels: ${{ steps.meta.outputs.labels }}
