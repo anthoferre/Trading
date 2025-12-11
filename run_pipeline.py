@@ -147,26 +147,6 @@ def main():
     # 2. Exécution séquentielle
     execute_train_and_predict_forced(features_without_multicol, target, preprocessor, features_all_cols, config)
 
-    df_candle = df_labeled.tail(100)
-
-    apds = [
-        mpf.make_addplot(df_candle['rsi'], panel=1, ylabel='RSI'),
-        mpf.make_addplot(df_candle['lower_band'], panel=0, color='green', label='lower_band'),
-        mpf.make_addplot(df_candle['upper_band'], panel=0, color='red', label='upper_band'),
-        mpf.make_addplot(df_candle['middle_band'], panel=0, color='blue', label='middle_band'),
-        mpf.make_addplot(df_candle['macd'], panel=2, color='blue', label='macd'),
-        mpf.make_addplot(df_candle['signal'], panel=2, color='green', label='signal'),
-    ]
-
-    mpf.plot(
-        data=df_candle,
-        addplot=apds,
-        type='candle',
-        volume=False,
-        ylabel='Prix',
-        style='yahoo'
-    )
-
 
 if __name__ == "__main__":
     main()
