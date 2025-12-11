@@ -7,23 +7,23 @@ volumes:
 services:
   # A. Service pour l'Entraînement et la Préparation des Données
   pipeline:
-    build: 
+    build:
       context: .
-      dockerfile: Dockerfile.pipeline 
-    image: trading-pipeline:latest
+      dockerfile: Dockerfile.pipeline
+    image: ghcr.io/anthoferre/trading/training-pipeline:latest
     volumes:
-      - trading_models:/app/models 
+      - trading_models:/app/models
       - ./config:/app/config
       - mlruns:/app/mlruns
-    restart: "on-failure"    
-    entrypoint: ["python", "run_pipeline.py"] 
+    restart: "on-failure"
+    entrypoint: ["python", "run_pipeline.py"]
 
   # B. Service pour l'API (Inférence en temps réel)
   api:
-    build: 
+    build:
       context: .
-      dockerfile: Dockerfile.api 
-    image: trading-api:latest
+      dockerfile: Dockerfile.api
+    image: ghcr.io/anthoferre/trading/training-api:latest
     ports:
       - "8000:80"
     volumes:
@@ -33,7 +33,7 @@ services:
 
   # C. MLFlow
   mlflow-server:
-    image: trading-pipeline:latest
+    image: ghcr.io/anthoferre/trading/training-pipeline:latest
     container_name: mlflow_tracker
     ports:
       - "5000:5000"

@@ -44,15 +44,22 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: 7. Définir les métadonnées de l'image
-      id: meta
+    - name: 7a. Métadonnées de l'image Pipeline
+      id: meta-pipeline
       uses: docker/metadata-action@v5
       with:
-        images: ghcr.io/${{ github.repository }}
+        images: ghcr.io/${{ github.repository }}/training-pipeline
         tags: |
-          # Tag basé sur le SHA complet du commit
           type=sha,format=long
-          # Tag 'latest' uniquement sur la branche main
+          type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
+
+    - name: 7b. Métadonnées de l'image API
+      id: meta-api
+      uses: docker/metadata-action@v5
+      with:
+        images: ghcr.io/${{ github.repository }}/trading-api
+        tags: |
+          type=sha,format=long
           type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
 
     - name: 8a. Construire et pousser l'image Docker pour la pipeline
@@ -61,10 +68,8 @@ jobs:
         context: .
         file: ./Dockerfile.pipeline
         push: True
-        tags: |
-          ghcr.io/${{ github.repository }}/training-pipeline:${{ steps.meta.outputs.version_tag }}
-          ghcr.io/${{ github.repository }}/training-pipeline:${{ steps.meta.outputs.latest_tag }}
-        labels: ${{ steps.meta.outputs.labels }}
+        tags: ${{ steps.meta-pipeline.outputs.tags }} # Utilise les tags générés par 7a
+        labels: ${{ steps.meta-pipeline.outputs.labels }}
 
     - name: 8b. Construire et pousser l'image Docker pour l'API
       uses: docker/build-push-action@v5
@@ -72,7 +77,5 @@ jobs:
         context: .
         file: ./Dockerfile.api
         push: True
-        tags: |
-          ghcr.io/${{ github.repository }}/trading-api:${{ steps.meta.outputs.version_tag }}
-          ghcr.io/${{ github.repository }}/trading-api:${{ steps.meta.outputs.latest_tag }}
-        labels: ${{ steps.meta.outputs.labels }}
+        tags: ${{ steps.meta-api.outputs.tags }} # Utilise les tags générés par 7b
+        labels: ${{ steps.meta-api.outputs.labels }}
