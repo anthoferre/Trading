@@ -8,11 +8,11 @@ on:
 jobs:
   build_and_push_image:
     runs-on: ubuntu-latest
-    
+
     permissions:
-      contents: read 
-      packages: write 
-    
+      contents: read
+      packages: write
+
     steps:
     - name: 1. Vérification du code
       uses: actions/checkout@v4
@@ -21,7 +21,7 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
-    
+
     - name: 3. Cache des dépendances python
       uses: actions/cache@v4
       with:
@@ -51,14 +51,24 @@ jobs:
         images: ghcr.io/${{ github.repository }}
         tags: |
           # Tag basé sur le SHA complet du commit
-          type=sha,format=long 
+          type=sha,format=long
           # Tag 'latest' uniquement sur la branche main
           type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
-          
-    - name: 8. Construire et pousser l'image Docker
+
+    - name: 8a. Construire et pousser l'image Docker pour la pipeline
       uses: docker/build-push-action@v5
       with:
         context: .
+        file: ./Dockerfile.pipeline
         push: True
-        tags: ${{ steps.meta.outputs.tags }}
+        tags: ghcr.io/${{ github.repository }}/training-pipeline:${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+
+    - name: 8b. Construire et pousser l'image Docker pour l'API
+      uses: docker/build-push-actions@v5
+      with:
+        context: .
+        file: ./Dockerfile.api
+        push: True
+        tags: ghcr.io/${{ github.repository }}/trading-api:${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
