@@ -7,7 +7,6 @@ import pandas as pd
 import yaml
 
 from database_manager import (
-    DB_NAME,
     create_connection,
     create_table,
     get_last_datetime,

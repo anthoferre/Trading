@@ -147,8 +147,6 @@ def predict_realtime_candle():
         result = get_prediction(
             final_model=model,
             ticker=CONFIG['data']['ticker'],
-            interval=CONFIG['data']['interval'],
-            period=CONFIG['data']['period'],
             features_train_cols=FEATURES_LIST
         )
 
