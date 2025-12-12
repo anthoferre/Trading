@@ -36,9 +36,9 @@ def calculate_rsi(df, close, N):
 def calculate_atr_series(
     df: pd.DataFrame,
     period: int = 14,
-    col_high: str = 'High',
-    col_low: str = 'Low',
-    col_close: str = 'Close'
+    col_high: str = 'high',
+    col_low: str = 'low',
+    col_close: str = 'close'
 ) -> pd.Series:
     """
     Calcule l'Average True Range (ATR) et retourne la série de l'ATR.
@@ -88,12 +88,12 @@ def get_double_barrier_levels(df, atr_col='ATR', profit_mult=2.0, stop_mult=1.0)
     atr_threshold = df[atr_col]
 
     # Cas d'achat (long)
-    df['tp_long'] = df['Close'] + (atr_threshold * profit_mult)
-    df['sl_long'] = df['Close'] - (atr_threshold * stop_mult)
+    df['tp_long'] = df['close'] + (atr_threshold * profit_mult)
+    df['sl_long'] = df['close'] - (atr_threshold * stop_mult)
 
     # Cas de vente (short)
-    df['tp_short'] = df['Close'] - (atr_threshold * profit_mult)
-    df['sl_short'] = df['Close'] + (atr_threshold * stop_mult)
+    df['tp_short'] = df['close'] - (atr_threshold * profit_mult)
+    df['sl_short'] = df['close'] + (atr_threshold * stop_mult)
 
     return df
 
@@ -129,12 +129,12 @@ def label_double_barrier(df: pd.DataFrame) -> pd.Series:
         # --- 1. Déterminer les indices du PREMIER contact pour chaque barrière ---
 
         # Long side
-        hit_tp_long_idx = future_window[future_window['High'] >= tp_long].index.min()
-        hit_sl_long_idx = future_window[future_window['Low'] <= sl_long].index.min()
+        hit_tp_long_idx = future_window[future_window['high'] >= tp_long].index.min()
+        hit_sl_long_idx = future_window[future_window['low'] <= sl_long].index.min()
 
         # Short side
-        hit_tp_short_idx = future_window[future_window['Low'] <= tp_short].index.min()
-        hit_sl_short_idx = future_window[future_window['High'] >= sl_short].index.min()
+        hit_tp_short_idx = future_window[future_window['low'] <= tp_short].index.min()
+        hit_sl_short_idx = future_window[future_window['high'] >= sl_short].index.min()
 
         # --- 2. Trouver le premier événement global ---
 
@@ -170,7 +170,7 @@ def calculate_adx_dmi(df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
     et le Negative Directional Indicator (-DI) pour un DataFrame.
 
     Args:
-        df (pd.DataFrame): DataFrame contenant les colonnes 'High', 'Low', 'Close'.
+        df (pd.DataFrame): DataFrame contenant les colonnes 'high', 'low', 'close'.
         period (int): Période de lissage (par défaut 14).
 
     Returns:
@@ -181,13 +181,13 @@ def calculate_adx_dmi(df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
     df_result = df.copy()
 
     # --- 1. Mouvements Directionnels Bruts (UpMove, DownMove) ---
-    df_result['UpMove'] = df_result['High'].diff()
-    df_result['DownMove'] = df_result['Low'].diff() * -1  # Rendre le mouvement vers le bas positif
+    df_result['UpMove'] = df_result['high'].diff()
+    df_result['DownMove'] = df_result['low'].diff() * -1  # Rendre le mouvement vers le bas positif
 
     # --- 2. True Range (TR) ---
-    high_low = df_result['High'] - df_result['Low']
-    high_close_prev = abs(df_result['High'] - df_result['Close'].shift(1))
-    low_close_prev = abs(df_result['Low'] - df_result['Close'].shift(1))
+    high_low = df_result['high'] - df_result['low']
+    high_close_prev = abs(df_result['high'] - df_result['close'].shift(1))
+    low_close_prev = abs(df_result['low'] - df_result['close'].shift(1))
 
     # Le TR est le maximum de ces trois valeurs
     df_result['TR'] = pd.concat([high_low, high_close_prev, low_close_prev], axis=1).max(axis=1)

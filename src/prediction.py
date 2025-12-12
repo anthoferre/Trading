@@ -4,7 +4,7 @@ import joblib
 import numpy as np
 from sklearn.pipeline import Pipeline
 
-from src.data_ingestion import fetch_data
+from database_manager import create_connection, load_data
 from src.feature_engineering import generate_features_and_labels
 
 
@@ -25,7 +25,7 @@ def load_latest_model(model_path: str = "models/XGBoost_Trading_Model.pkl") -> P
                                 Assurez vous d'avoir exécuter l'entraînement.")
 
 
-def get_prediction(final_model: Pipeline, ticker: str, interval: str, period: str, features_train_cols: list) -> dict:
+def get_prediction(final_model: Pipeline, ticker: str, features_train_cols: list) -> dict:
     """
     Prédire la dernière bougie en direct.
     Args:
@@ -35,13 +35,18 @@ def get_prediction(final_model: Pipeline, ticker: str, interval: str, period: st
         period: la période complète des données
         features_train_cols: la liste des colonnes du df de l'entraînement
     """
-    df_raw = fetch_data(ticker=ticker, interval=interval, period=period)
 
-    if df_raw.empty:
+    conn = create_connection()
+    if conn is None:
+        return
+    df_history = load_data(conn=conn, symbol=ticker)
+    conn.close()
+
+    if df_history.empty:
         return {"status": "error", "message": "Impossible de charger les données récentes."}
 
     # Calcul des features
-    df_labeled = generate_features_and_labels(df=df_raw)
+    df_labeled = generate_features_and_labels(df=df_history)
 
     # Dernière bougie pour la prédiction
     df_last_candle = df_labeled.iloc[[-1]].copy()

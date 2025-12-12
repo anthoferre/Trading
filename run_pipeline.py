@@ -1,9 +1,19 @@
 # run_pipeline.py (Mode Forcé : Entraînement puis Prédiction)
+from datetime import datetime, timedelta
 
 import mlflow
 import numpy as np
+import pandas as pd
 import yaml
 
+from database_manager import (
+    DB_NAME,
+    create_connection,
+    create_table,
+    get_last_datetime,
+    insert_data,
+    load_data,
+)
 from src.data_ingestion import fetch_data
 from src.feature_engineering import generate_features_and_labels
 from src.prediction import get_prediction, load_latest_model
@@ -23,17 +33,11 @@ def load_config(*, config_path: str = "config/config.yaml") -> dict:
         return yaml.safe_load(file)
 
 
-def prepare_data(config: dict) -> tuple:
+def prepare_data(config: dict, df: pd.DataFrame) -> tuple:
     """Orchestre le Pipeline d'ingestion et de feature engineering."""
 
-    df_raw = fetch_data(
-        ticker=config['data']['ticker'],
-        interval=config['data']['interval'],
-        period=config['data']['period']
-    )
-
     df_labeled = generate_features_and_labels(
-        df=df_raw,
+        df=df,
         tp_mult=config['strategy']['tp_mult'],
         sl_mult=config['strategy']['sl_mult']
     )
@@ -80,8 +84,6 @@ def execute_predict_mode(features_all_cols, config):
         prediction_result = get_prediction(
             final_model=final_model,
             ticker=config['data']['ticker'],
-            interval=config['data']['interval'],
-            period=config['data']['period'],
             features_train_cols=features_all_cols
         )
 
@@ -136,9 +138,48 @@ def main():
         print("❌ Erreur critique : Le fichier 'config/config.yaml' est introuvable. Arrêt du pipeline.")
         return
 
+    SYMBOL = config['data']['ticker']
+
+    conn = create_connection()
+    if conn is None:
+        return
+
+    create_table(conn)
+
+    last_dt = get_last_datetime(conn=conn, symbol=SYMBOL)
+    print(f"La dernière date enregistrée est {last_dt}")
+
+    # Récupération des données pour mise à jour
+    df_raw = fetch_data(
+        ticker=SYMBOL,
+        interval=config['data']['interval'],
+        period=config['data']['period']
+    )
+
+    if df_raw.empty:
+        print("Aucune nouvelle donnée à insérer/mettre à jour. Chargement de l'historique")
+    else:
+        df_to_insert = df_raw.reset_index()
+
+        df_to_insert.columns = [col.lower() if col not in ['symbol'] else col for col in df_to_insert.columns]
+        df_to_insert['datetime'] = df_to_insert['datetime'].dt.strftime('%Y-%m-%d %H:%M:%S')
+        df_to_insert['symbol'] = SYMBOL
+
+        df_to_insert = df_to_insert[['symbol', 'datetime', 'open', 'high', 'low', 'close', 'volume']]
+
+        insert_data(conn=conn, df=df_to_insert)
+
+    print("⏳ Chargement de l'historique complet pour l'entraînement ")
+    df_history = load_data(conn=conn, symbol=SYMBOL)
+    conn.close()
+
+    if df_history.empty:
+        print("❌ Erreur: la base de données est vide.")
+        return
+
     print("⚡Entraînement et Prédiction Séquentiels")
 
-    df_labeled, features_for_models, target, preprocessor, features_all_cols = prepare_data(config)
+    df_labeled, features_for_models, target, preprocessor, features_all_cols = prepare_data(config, df_history)
 
     features_without_multicol = drop_multicol(features=features_for_models, threshold=0.85)
 
